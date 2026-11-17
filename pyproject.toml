@@ -127,6 +127,8 @@ convention = "pep257"
 "scripts/**" = ["INP001", "T201"]
 # the standalone bridge is a command line program next to the provider
 "standalone/**" = ["INP001"]
+# the Home Assistant add-on's entry point
+"hyperhdr_sync_addon/**" = ["INP001"]
 
 [tool.ruff.lint.flake8-pytest-style]
 fixture-parentheses = false

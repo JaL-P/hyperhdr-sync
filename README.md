@@ -10,24 +10,41 @@ data, renders light effects for your LED layout, and streams one colour per LED 
 **UDP raw receiver**. When the music stops, HyperHDR goes back to what it showed before (usually
 the screen grabber) three seconds later.
 
-It comes in two forms that share the same rendering code:
+It comes in three forms that share the same rendering code:
 
-| | Standalone bridge | Music Assistant plugin |
-|---|---|---|
-| Where it runs | Any machine, e.g. the PC running HyperHDR | Inside Music Assistant |
-| Needs | Python 3.12+ | A Music Assistant version with community providers |
-| Shows up in Music Assistant as | A visualizer player | A light player |
-| Settings | Command line | Music Assistant's settings pages, changeable while playing |
-| Status | Tested on real hardware with Music Assistant 2.11.0b9 | Tested on real hardware with a dev-branch server; needs a server with community providers |
+| | Home Assistant add-on | Standalone bridge | Music Assistant plugin |
+|---|---|---|---|
+| Where it runs | Next to the Music Assistant add-on | Any machine, e.g. the PC running HyperHDR | Inside Music Assistant |
+| Needs | Home Assistant OS or Supervised | Python 3.12+ | A Music Assistant version with community providers |
+| Shows up in Music Assistant as | A visualizer player | A visualizer player | A light player |
+| Settings | The add-on's Configuration tab | Command line | Music Assistant's settings pages, changeable while playing |
+
+The add-on and the standalone bridge are the same program and work with Music Assistant 2.11
+today. The plugin needs a Music Assistant version that can load community providers.
+
+## Home Assistant add-on
+
+[![Add the repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FJaL-P%2Fhyperhdr-sync)
+
+1. Prepare HyperHDR (below).
+2. In Home Assistant open **Settings > Add-ons > Add-on Store**, choose **Repositories** in the
+   ⋮ menu and add `https://github.com/JaL-P/hyperhdr-sync` (or use the button above).
+3. Install **HyperHDR Sync**, enter HyperHDR's IP address under **Configuration** and start it.
+4. In Music Assistant, group the new **HyperHDR LEDs** player with a speaker and play something.
+
+The default Sendspin address `ws://127.0.0.1:8927/sendspin` reaches a Music Assistant add-on on
+the same Home Assistant. Its folder is [`hyperhdr_sync_addon/`](hyperhdr_sync_addon); each
+add-on version installs the release tag of the same version.
 
 ## Prepare HyperHDR
 
 1. In HyperHDR open **Advanced > Network Services** (for the LED instance you want to drive).
 2. Under **UDP raw receiver**, tick **Activate** and save. Keep port `5568`. The priority
    channel (default `109`) must be a lower number than your grabber's so music wins while it plays.
-3. Only when HyperHDR runs on a *different* machine than the bridge or Music Assistant: create a
-   token under **Token Management**. Reading the LED layout over the network needs it, and
-   HyperHDR refuses remote connections altogether while it still has its default password.
+3. Only when the bridge, add-on or Music Assistant is on a *different subnet* than HyperHDR:
+   create a token under **Token Management** and give it with `--token` or the add-on's token
+   option. HyperHDR answers machines on its own subnet without one, and refuses the others
+   without a token.
 
 HyperHDR's own smoothing and colour calibration still apply to the music colours.
 
@@ -124,6 +141,7 @@ HyperHDR client and run anywhere.
 | `hyperhdr_sync/hyperhdr.py` | Reads the LED layout, sends UDP frames |
 | `hyperhdr_sync/bridge.py`, `provider.py`, `setup_flow.py`, `settings.py` | The Music Assistant plugin |
 | `standalone/hyperhdr_bridge.py` | The standalone bridge |
+| `hyperhdr_sync_addon/`, `repository.yaml` | The Home Assistant add-on, which runs the standalone bridge |
 
 ## Licence
 

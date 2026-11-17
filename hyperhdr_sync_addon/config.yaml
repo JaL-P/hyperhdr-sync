@@ -1,0 +1,42 @@
+name: "HyperHDR Sync"
+version: "0.2.0"
+slug: "hyperhdr_sync"
+description: "Makes your HyperHDR LEDs react to the music Music Assistant plays"
+url: "https://github.com/JaL-P/hyperhdr-sync"
+arch:
+  - aarch64
+  - amd64
+stage: experimental
+startup: application
+boot: auto
+# The base image starts the bridge through S6 overlay, which must be PID 1.
+init: false
+# Reaches the Music Assistant add-on on 127.0.0.1 (it uses the host network too).
+host_network: true
+options:
+  server: "ws://127.0.0.1:8927/sendspin"
+  name: "HyperHDR LEDs"
+  effect: "spectrum"
+  palette: "album"
+  brightness: 100
+  sensitivity: 0
+  response: "balanced"
+  latency_ms: 120
+  udp_port: 5568
+  web_port: 8090
+  log_level: "info"
+schema:
+  server: "str"
+  # no default: the add-on does not start until this is filled in
+  hyperhdr_host: "str"
+  name: "str"
+  effect: "list(spectrum|vu|pulse|ripple|scroll|energy|ambient)"
+  palette: "list(album|rainbow|sunset|ocean|fire|forest|neon)"
+  brightness: "int(0,100)"
+  sensitivity: "float(-12,12)"
+  response: "list(snappy|balanced|smooth)"
+  latency_ms: "int(0,2000)"
+  udp_port: "port"
+  web_port: "port"
+  token: "password?"
+  log_level: "list(debug|info|warning|error)"

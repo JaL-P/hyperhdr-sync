@@ -1,0 +1,40 @@
+configuration:
+  server:
+    name: "Music Assistant Sendspin address"
+    description: "Keep the default when Music Assistant runs as an add-on on this Home Assistant."
+  hyperhdr_host:
+    name: "HyperHDR address"
+    description: "IP address or hostname of the machine HyperHDR runs on, e.g. 192.168.1.20."
+  name:
+    name: "Player name"
+    description: "Name of the player that appears in Music Assistant."
+  effect:
+    name: "Effect"
+    description: "spectrum, vu (level meter), pulse, ripple, scroll, energy or ambient."
+  palette:
+    name: "Colours"
+    description: "album uses the colours of the cover art."
+  brightness:
+    name: "Brightness"
+    description: "Percent, on top of HyperHDR's own brightness."
+  sensitivity:
+    name: "Sensitivity"
+    description: "dB. Raise it if the lights look flat, lower it if they are always bright."
+  response:
+    name: "Response"
+    description: "How quickly the lights follow the music."
+  latency_ms:
+    name: "Latency"
+    description: "Milliseconds the lights run ahead of the music. Raise it if the lights lag."
+  udp_port:
+    name: "HyperHDR UDP raw receiver port"
+    description: "Each HyperHDR LED instance has its own port."
+  web_port:
+    name: "HyperHDR web port"
+    description: "Used to read the LED layout."
+  token:
+    name: "HyperHDR API token"
+    description: "Only needed when HyperHDR is on another subnet than Home Assistant."
+  log_level:
+    name: "Log level"
+    description: "debug also logs a summary every 10 seconds."

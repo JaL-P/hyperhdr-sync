@@ -21,6 +21,7 @@ import contextlib
 import logging
 import math
 import os
+import signal
 import sys
 import time
 from collections import deque
@@ -369,14 +370,21 @@ async def run(args: argparse.Namespace) -> None:
             response=Response(args.response),
         )
         bridge = Bridge(Engine(layout, settings), sender, args.latency_ms)
+        # Stop as cleanly on SIGTERM (a service or container stopping) as on Ctrl+C.
+        task = asyncio.current_task()
+        if task is not None and hasattr(signal, "SIGTERM"):
+            with contextlib.suppress(NotImplementedError):  # no signal handlers on Windows
+                asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
         try:
             if args.demo:
                 await demo_loop(bridge)
             else:
                 await asyncio.gather(bridge.render_loop(), connect_loop(bridge, args, session))
         finally:
+            # Spaced out, so they are not dropped together; the socket closes right after.
             for _ in range(3):
                 bridge._send(bridge.engine.render_black())  # noqa: SLF001
+                await asyncio.sleep(0.05)
             sender.close()
 
 
@@ -436,7 +444,7 @@ def main() -> None:
     """Entry point."""
     args = parse_args()
     logging.basicConfig(level=args.log_level, format="%(asctime)s %(levelname)s %(message)s")
-    with contextlib.suppress(KeyboardInterrupt):
+    with contextlib.suppress(KeyboardInterrupt, asyncio.CancelledError):
         asyncio.run(run(args))
 
 
