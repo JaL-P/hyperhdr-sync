@@ -50,7 +50,10 @@ def test_config_is_complete() -> None:
     assert set(config["options"]) <= set(config["schema"])
     # the HyperHDR address has no default, so the add-on waits until it is set
     assert "hyperhdr_host" not in config["options"]
-    assert f"BRIDGE_REF=v{config['version']}" in (ADDON / "Dockerfile").read_text(encoding="utf-8")
+    # the default used for building by hand follows the add-on version
+    dockerfile = (ADDON / "Dockerfile").read_text(encoding="utf-8")
+    assert f"ARG BUILD_VERSION={config['version']}\n" in dockerfile
+    assert "refs/tags/v${BUILD_VERSION}.tar.gz" in dockerfile
 
 
 def test_choices_match_engine() -> None:
