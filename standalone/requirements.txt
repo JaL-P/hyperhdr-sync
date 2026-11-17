@@ -1,0 +1,6 @@
+# What the standalone bridge needs (the plugin inside Music Assistant needs nothing extra).
+# Keep aiosendspin at the version your Music Assistant server uses
+# (see music_assistant/providers/sendspin/manifest.json of the server).
+aiosendspin==10.3.0
+aiohttp>=3.14
+numpy>=2.1

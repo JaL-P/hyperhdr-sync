@@ -1,0 +1,428 @@
+"""
+Standalone HyperHDR music sync bridge.
+
+Does the same as the "HyperHDR Sync" Music Assistant plugin in this repository, but
+runs as its own small program, for example on the PC that runs HyperHDR. It joins
+Music Assistant as a Sendspin visualizer client over the network, so nothing has to
+be installed into Music Assistant: the bridge shows up there as a player that you
+group with the speaker the lights should follow.
+
+    python standalone/hyperhdr_bridge.py --server ws://MUSIC-ASSISTANT-HOST:8927/sendspin
+
+Run with --demo to drive the LEDs with a built-in test beat, without Music Assistant.
+Needs Python 3.12+ and the packages in standalone/requirements.txt.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import contextlib
+import logging
+import math
+import os
+import sys
+import time
+from collections import deque
+from dataclasses import replace
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import aiohttp
+
+# The rendering engine lives in the plugin's folder, next to this folder.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from hyperhdr_sync.engine import (
+    SPECTRUM_BINS,
+    SPECTRUM_F_MAX,
+    SPECTRUM_F_MIN,
+    SPECTRUM_SCALE,
+    Effect,
+    Engine,
+    EngineSettings,
+    Palette,
+    Response,
+)
+from hyperhdr_sync.hyperhdr import (
+    DEFAULT_UDP_PORT,
+    DEFAULT_WEB_PORT,
+    MAX_LEDS,
+    HyperHdrError,
+    HyperHdrUdpSender,
+    fetch_serverinfo,
+)
+from hyperhdr_sync.layout import LedLayout
+
+if TYPE_CHECKING:
+    from aiosendspin.client import SendspinClient
+    from aiosendspin.models.core import ServerStatePayload, StreamStartMessage
+    from aiosendspin.models.visualizer import VisualizerFrame
+
+LOGGER = logging.getLogger("hyperhdr_bridge")
+
+RENDER_RATE_HZ = 40
+RECONNECT_INTERVAL_S = 5.0
+# Bytes of visualizer data Music Assistant may send ahead (a few seconds' worth).
+BUFFER_CAPACITY = 16384
+STALE_BEAT_US = 250_000
+COLOR_FIELDS = ("primary", "accent", "background_light", "background_dark", "on_dark")
+DEFAULT_STATE_DIR = Path.home() / ".hyperhdr-sync-bridge"
+
+
+class Bridge:
+    """Receives visualizer features from Music Assistant and renders them to HyperHDR."""
+
+    def __init__(self, engine: Engine, sender: HyperHdrUdpSender, latency_ms: int) -> None:
+        """
+        Initialize the bridge.
+
+        :param engine: The rendering engine for the LEDs.
+        :param sender: Opened sender for HyperHDR's UDP raw receiver.
+        :param latency_ms: How far ahead of the music the lights are rendered.
+        """
+        self.engine = engine
+        self.sender = sender
+        self.latency_us = latency_ms * 1000
+        self.client: SendspinClient | None = None
+        self.streaming = False
+        self._frames: deque[VisualizerFrame] = deque()
+        self._beats: list[VisualizerFrame] = []
+        self._colors: dict[str, tuple[int, int, int] | None] = {}
+        self._stats = {"frames": 0, "beats": 0, "peak": 0}
+
+    # ---------------------------------------------------- Sendspin callbacks
+
+    def on_stream_start(self, message: StreamStartMessage) -> None:
+        """Start rendering when Music Assistant starts a visualizer stream."""
+        if message.payload.visualizer is None:
+            return
+        if not self.streaming:
+            LOGGER.info("Music started, driving the LEDs")
+            self._frames.clear()
+            self.engine.reset()
+        self.streaming = True
+
+    def on_stream_end(self, roles: list[str] | None) -> None:
+        """Stop rendering and switch the LEDs off when the stream ends."""
+        if roles is not None and "visualizer" not in roles:
+            return
+        if self.streaming:
+            LOGGER.info("Music stopped, releasing the LEDs")
+        self.stop_stream()
+
+    def on_stream_clear(self, roles: list[str] | None) -> None:
+        """Drop features that belong to audio before a seek."""
+        if roles is None or "visualizer" in roles:
+            self._frames.clear()
+            self._beats.clear()
+            self.engine.reset()
+
+    def on_frames(self, frames: list[VisualizerFrame]) -> None:
+        """Queue feature frames until their playback time."""
+        for frame in frames:
+            if frame.is_downbeat is not None:
+                if not self.streaming:
+                    continue
+                self._beats.append(frame)
+                self._beats.sort(key=lambda beat: beat.timestamp_us)
+            elif self.streaming:
+                self._frames.append(frame)
+
+    def on_color(self, payload: ServerStatePayload | None) -> None:
+        """Take over the colours of the current track's artwork."""
+        color = payload.color if payload is not None else None
+        if color is None:
+            return
+        for name in COLOR_FIELDS:
+            value = getattr(color, name, None)
+            # a field the server left undefined keeps its colour, None clears it
+            if value is None:
+                self._colors[name] = None
+            elif isinstance(value, (tuple, list)) and len(value) >= 3:
+                self._colors[name] = (int(value[0]), int(value[1]), int(value[2]))
+        self.engine.set_album_colors(
+            [c for name in COLOR_FIELDS if (c := self._colors.get(name)) is not None]
+        )
+
+    def stop_stream(self) -> None:
+        """Stop rendering; the render loop then blacks the LEDs out."""
+        self.streaming = False
+        self._frames.clear()
+        self._beats.clear()
+        self.engine.reset()
+
+    # ----------------------------------------------------------- render loop
+
+    async def render_loop(self) -> None:
+        """Render at a fixed rate while music plays; send a few black frames when it stops."""
+        period = 1.0 / RENDER_RATE_HZ
+        last = time.perf_counter()
+        blackouts_left = 0
+        next_report = last + 10.0
+        while True:
+            await asyncio.sleep(period)
+            now = time.perf_counter()
+            dt, last = now - last, now
+            if self.streaming and self.client is not None:
+                playhead_us = (
+                    self.client.compute_server_time(self.client.now_us()) + self.latency_us
+                )
+                self._drain(playhead_us)
+                rgb = self.engine.render(dt)
+                self._stats["peak"] = max(self._stats["peak"], *rgb)
+                self._send(rgb)
+                blackouts_left = 3
+                if now >= next_report:
+                    next_report = now + 10.0
+                    LOGGER.debug(
+                        "Last 10 s: %(frames)d feature frames, %(beats)d beats, brightest LED %(peak)d/255",
+                        self._stats,
+                    )
+                    self._stats = {"frames": 0, "beats": 0, "peak": 0}
+            elif blackouts_left > 0:
+                # HyperHDR hands the LEDs back to its other sources 3 seconds after the last frame.
+                self._send(self.engine.render_black())
+                blackouts_left -= 1
+
+    def _drain(self, playhead_us: int) -> None:
+        """Feed the engine everything that is audible by now."""
+        frames = self._frames
+        while frames and frames[0].timestamp_us <= playhead_us:
+            frame = frames.popleft()
+            self._stats["frames"] += 1
+            self.engine.feed(
+                loudness=frame.loudness, spectrum=frame.spectrum, onset=frame.peak_strength
+            )
+        while self._beats and self._beats[0].timestamp_us <= playhead_us:
+            beat = self._beats.pop(0)
+            if playhead_us - beat.timestamp_us <= STALE_BEAT_US:
+                self._stats["beats"] += 1
+                self.engine.beat(1.0 if beat.is_downbeat else 0.8)
+
+    def _send(self, rgb: bytes) -> None:
+        with contextlib.suppress(OSError):
+            self.sender.send(rgb)
+
+
+async def connect_loop(
+    bridge: Bridge, args: argparse.Namespace, session: aiohttp.ClientSession
+) -> None:
+    """Stay connected to Music Assistant's Sendspin server, retrying while it is unreachable."""
+    from aiosendspin.client import PairingSupport, SendspinClient  # noqa: PLC0415
+    from aiosendspin.models.core import DeviceInfo  # noqa: PLC0415
+    from aiosendspin.models.types import Roles  # noqa: PLC0415
+    from aiosendspin.models.visualizer import (  # noqa: PLC0415
+        ClientHelloVisualizerSpectrum,
+        ClientHelloVisualizerSupport,
+        VisualizerStatePayload,
+    )
+    from aiosendspin.noise.keys import Identity  # noqa: PLC0415
+    from aiosendspin.noise.trust_store import FileClientPairingStore  # noqa: PLC0415
+
+    state_dir = Path(args.state_dir)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    # A stable identity keeps the same player (and its group) in Music Assistant across restarts.
+    key_file = state_dir / "identity.key"
+    if key_file.exists():
+        identity = Identity.from_private_bytes(key_file.read_bytes())
+    else:
+        identity = Identity.generate()
+        key_file.write_bytes(identity.private_bytes)
+        with contextlib.suppress(OSError):
+            key_file.chmod(0o600)
+    store = await FileClientPairingStore.open(state_dir / "pairing.json")
+    # The bridge only receives sound features, which Music Assistant hands out without pairing.
+    await store.store_pairing_config(
+        replace(await store.get_pairing_config(), unpaired_access_enabled=True)
+    )
+    client = SendspinClient(
+        identity,
+        args.name,
+        [Roles.VISUALIZER, Roles.COLOR],
+        pairing_store=store,
+        device_info=DeviceInfo(product_name="HyperHDR Sync bridge", manufacturer="HyperHDR"),
+        visualizer_support=ClientHelloVisualizerSupport(buffer_capacity=BUFFER_CAPACITY),
+        visualizer_state=VisualizerStatePayload(
+            types=["beat", "peak", "loudness", "spectrum"],
+            rate_max=RENDER_RATE_HZ,
+            spectrum=ClientHelloVisualizerSpectrum(
+                n_disp_bins=SPECTRUM_BINS,
+                scale=SPECTRUM_SCALE,  # type: ignore[arg-type]
+                f_min=SPECTRUM_F_MIN,
+                f_max=SPECTRUM_F_MAX,
+            ),
+        ),
+        pairing_support=PairingSupport(offer_static_pairing_code=False),
+        session=session,
+    )
+    disconnected = asyncio.Event()
+    client.add_disconnect_listener(disconnected.set)
+    client.add_stream_start_listener(bridge.on_stream_start)
+    client.add_stream_end_listener(bridge.on_stream_end)
+    client.add_stream_clear_listener(bridge.on_stream_clear)
+    client.add_visualizer_listener(bridge.on_frames)
+    client.add_color_listener(bridge.on_color)
+    bridge.client = client
+    LOGGER.info("Sendspin client id: %s", identity.peer_id)
+    try:
+        while True:
+            disconnected.clear()
+            try:
+                await client.connect(args.server)
+            except Exception as err:  # noqa: BLE001 - any failure is retried
+                LOGGER.warning(
+                    "Cannot connect to %s (%s), retrying", args.server, err or type(err).__name__
+                )
+                await asyncio.sleep(RECONNECT_INTERVAL_S)
+                continue
+            LOGGER.info(
+                "Connected to Music Assistant as '%s'. Group this player with a speaker there.",
+                args.name,
+            )
+            await disconnected.wait()
+            LOGGER.warning("Disconnected from Music Assistant, reconnecting")
+            bridge.stop_stream()
+            await asyncio.sleep(RECONNECT_INTERVAL_S)
+    finally:
+        with contextlib.suppress(Exception):
+            await client.disconnect()
+
+
+async def demo_loop(bridge: Bridge) -> None:
+    """Drive the engine with a synthetic 120 BPM track, to test the LEDs without Music Assistant."""
+    LOGGER.info("Demo mode: playing a built-in test beat on the LEDs (Ctrl+C to stop)")
+    period = 1.0 / RENDER_RATE_HZ
+    start = last = time.perf_counter()
+    last_beat = -1
+    while True:
+        await asyncio.sleep(period)
+        now = time.perf_counter()
+        dt, last = now - last, now
+        t = now - start
+        beat_pos = t * 2.0  # two beats per second
+        kick = math.exp(-(beat_pos % 1.0) * 6.0)
+        hat = math.exp(-((beat_pos + 0.5) % 1.0) * 9.0)
+        sweep = 0.5 + 0.5 * math.sin(t * 0.7)
+        spectrum = []
+        for band in range(SPECTRUM_BINS):
+            x = band / (SPECTRUM_BINS - 1)
+            low = kick * math.exp(-(((x - 0.08) / 0.12) ** 2))
+            mid = (0.45 + 0.3 * math.sin(t * 1.9 + band)) * math.exp(
+                -(((x - sweep * 0.6 - 0.2) / 0.18) ** 2)
+            )
+            high = hat * math.exp(-(((x - 0.9) / 0.12) ** 2))
+            level = min(1.0, max(low, mid, high))
+            spectrum.append(int((0.35 + 0.5 * level) * 65535) if level > 0.02 else 9000)
+        onset = 200 if int(beat_pos) != last_beat else None
+        last_beat = int(beat_pos)
+        bridge.engine.feed(
+            loudness=int((0.55 + 0.3 * kick) * 65535), spectrum=spectrum, onset=onset
+        )
+        bridge._send(bridge.engine.render(dt))  # noqa: SLF001
+
+
+async def load_layout(args: argparse.Namespace, session: aiohttp.ClientSession) -> LedLayout:
+    """Read the LED layout from HyperHDR, waiting until HyperHDR can be reached."""
+    token = args.token or os.environ.get("HYPERHDR_TOKEN") or None
+    while True:
+        try:
+            info = await fetch_serverinfo(session, args.hyperhdr_host, args.web_port, token)
+            layout = LedLayout.from_serverinfo(info.get("leds") or [])
+        except (HyperHdrError, ValueError) as err:
+            LOGGER.warning("%s; retrying in %.0f s", err, RECONNECT_INTERVAL_S)
+            await asyncio.sleep(RECONNECT_INTERVAL_S)
+            continue
+        if layout.count > MAX_LEDS:
+            raise SystemExit(f"HyperHDR has {layout.count} LEDs; at most {MAX_LEDS} can be driven.")
+        return layout
+
+
+async def run(args: argparse.Namespace) -> None:
+    """Run the bridge until interrupted."""
+    async with aiohttp.ClientSession() as session:
+        layout = await load_layout(args, session)
+        LOGGER.info("HyperHDR at %s has %d LEDs", args.hyperhdr_host, layout.count)
+        sender = HyperHdrUdpSender(args.hyperhdr_host, args.udp_port)
+        await sender.open()
+        settings = EngineSettings(
+            effect=Effect(args.effect),
+            palette=Palette(args.palette),
+            brightness=args.brightness / 100.0,
+            sensitivity_db=args.sensitivity,
+            response=Response(args.response),
+        )
+        bridge = Bridge(Engine(layout, settings), sender, args.latency_ms)
+        try:
+            if args.demo:
+                await demo_loop(bridge)
+            else:
+                await asyncio.gather(bridge.render_loop(), connect_loop(bridge, args, session))
+        finally:
+            for _ in range(3):
+                bridge._send(bridge.engine.render_black())  # noqa: SLF001
+            sender.close()
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse the command line."""
+    parser = argparse.ArgumentParser(
+        description="Sync HyperHDR LEDs to the music played by Music Assistant.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--server",
+        help="Sendspin address of Music Assistant, e.g. ws://homeassistant.local:8927/sendspin",
+    )
+    parser.add_argument(
+        "--demo", action="store_true", help="play a test beat instead of connecting"
+    )
+    parser.add_argument(
+        "--name", default="HyperHDR LEDs", help="player name shown in Music Assistant"
+    )
+    parser.add_argument("--hyperhdr-host", default="127.0.0.1", help="machine HyperHDR runs on")
+    parser.add_argument("--web-port", type=int, default=DEFAULT_WEB_PORT, help="HyperHDR web port")
+    parser.add_argument(
+        "--udp-port", type=int, default=DEFAULT_UDP_PORT, help="HyperHDR UDP raw receiver port"
+    )
+    parser.add_argument(
+        "--token", help="HyperHDR API token (or set HYPERHDR_TOKEN); not needed on the same machine"
+    )
+    parser.add_argument(
+        "--effect", default=Effect.SPECTRUM.value, choices=[e.value for e in Effect]
+    )
+    parser.add_argument(
+        "--palette", default=Palette.ALBUM.value, choices=[p.value for p in Palette]
+    )
+    parser.add_argument("--brightness", type=int, default=100, help="brightness in percent")
+    parser.add_argument(
+        "--sensitivity", type=float, default=0.0, help="reaction strength in dB (-12..12)"
+    )
+    parser.add_argument(
+        "--response", default=Response.BALANCED.value, choices=[r.value for r in Response]
+    )
+    parser.add_argument(
+        "--latency-ms", type=int, default=120, help="render this far ahead of the music"
+    )
+    parser.add_argument(
+        "--state-dir", default=str(DEFAULT_STATE_DIR), help="where the bridge keeps its identity"
+    )
+    parser.add_argument(
+        "--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"]
+    )
+    args = parser.parse_args(argv)
+    if not args.demo and not args.server:
+        parser.error("give --server ws://HOST:8927/sendspin, or --demo")
+    return args
+
+
+def main() -> None:
+    """Entry point."""
+    args = parse_args()
+    logging.basicConfig(level=args.log_level, format="%(asctime)s %(levelname)s %(message)s")
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(run(args))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,13 @@
+{
+  "type": "plugin",
+  "domain": "hyperhdr_sync",
+  "stage": "experimental",
+  "name": "HyperHDR Sync",
+  "description": "Make the ambient LEDs driven by HyperHDR react to the music played by Music Assistant.",
+  "codeowners": ["@JaL-P"],
+  "requirements": [],
+  "depends_on": "sendspin",
+  "documentation": "https://github.com/JaL-P/hyperhdr-sync#readme",
+  "multi_instance": true,
+  "icon": "television-ambient-light"
+}

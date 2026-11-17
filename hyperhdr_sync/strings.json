@@ -1,0 +1,84 @@
+{
+  "config_entries": {
+    "host": {
+      "label": "HyperHDR address",
+      "description": "Hostname or IP address of the machine HyperHDR runs on."
+    },
+    "udp_port": {
+      "label": "UDP raw receiver port",
+      "description": "Port of HyperHDR's UDP raw receiver. Switch the receiver on in HyperHDR under Network Services, for the LED instance you want to drive."
+    },
+    "web_port": {
+      "label": "Web port",
+      "description": "Port of HyperHDR's web interface, used once to read how the LEDs are arranged."
+    },
+    "token": {
+      "label": "API token",
+      "description": "Only needed when HyperHDR runs on another machine and asks for authorization. Create one in HyperHDR under Advanced, Network Services, Token Management. Leave empty to keep the stored token."
+    },
+    "effect": {
+      "label": "Effect",
+      "description": "How the music is drawn on the LEDs.",
+      "options": {
+        "spectrum": "Spectrum: bass at the bottom, treble at the top",
+        "vu": "Level meter",
+        "pulse": "Pulse: all LEDs flash on the beat",
+        "ripple": "Ripple: a wave on every beat",
+        "scroll": "Scroll: sound colours flowing upwards",
+        "energy": "Energy: bass, mids and treble bars",
+        "ambient": "Ambient: calm colours that breathe with the music"
+      }
+    },
+    "palette": {
+      "label": "Colours",
+      "description": "Colours used by the effect. Album artwork follows the cover of the current track and falls back to rainbow when a cover has no usable colours.",
+      "options": {
+        "album": "Album artwork",
+        "rainbow": "Rainbow",
+        "sunset": "Sunset",
+        "ocean": "Ocean",
+        "fire": "Fire",
+        "forest": "Forest",
+        "neon": "Neon"
+      }
+    },
+    "brightness": {
+      "label": "Brightness (%)",
+      "description": "Brightness of the effect, on top of the brightness set in HyperHDR."
+    },
+    "sensitivity_db": {
+      "label": "Sensitivity",
+      "description": "How strongly the lights react. The level adapts to each track by itself; increase this if the effects look dim or flat, decrease it if they are stuck at maximum."
+    },
+    "response": {
+      "label": "Light response",
+      "description": "How quickly the lights follow the music.",
+      "options": {
+        "snappy": "Snappy",
+        "balanced": "Balanced",
+        "smooth": "Smooth"
+      }
+    },
+    "latency_ms": {
+      "label": "Light timing (ms)",
+      "description": "Makes the lights react slightly earlier so they stay in step with your speaker. Increase if the lights lag the music."
+    }
+  },
+  "setup_flow": {
+    "user": {
+      "title": "Connect to HyperHDR",
+      "description": "Enter the address of the machine HyperHDR runs on. In HyperHDR, switch on the UDP raw receiver under Network Services first."
+    }
+  },
+  "manifest": {
+    "name": "HyperHDR Sync",
+    "description": "Make the ambient LEDs driven by HyperHDR react to the music played by Music Assistant."
+  },
+  "errors": {
+    "cannot_connect": "Could not reach HyperHDR. Check the address and web port, and that HyperHDR is running.",
+    "auth_required": "HyperHDR asks for authorization. Enter an API token created in HyperHDR under Token Management.",
+    "no_leds": "HyperHDR reports no LEDs. Set up the LED layout in HyperHDR first.",
+    "too_many_leds": "This HyperHDR instance has more than 500 LEDs, which its UDP raw receiver cannot take.",
+    "already_configured": "This HyperHDR instance is already set up."
+  }
+}
