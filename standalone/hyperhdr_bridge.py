@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from aiosendspin.client import SendspinClient
     from aiosendspin.models.core import ServerStatePayload, StreamStartMessage
     from aiosendspin.models.visualizer import VisualizerFrame
+    from aiosendspin.noise.keys import Identity
 
 LOGGER = logging.getLogger("hyperhdr_bridge")
 
@@ -205,6 +206,29 @@ class Bridge:
             self.sender.send(rgb)
 
 
+def load_or_create_identity(key_file: Path) -> Identity:
+    """
+    Return the bridge's Sendspin identity, creating it on first run.
+
+    A stable identity keeps the same player (and its group) in Music Assistant across
+    restarts. A new key file is created owner-only from the start, never widened later.
+
+    :param key_file: File holding the 32-byte private key.
+    """
+    from aiosendspin.noise.keys import Identity  # noqa: PLC0415
+
+    try:
+        return Identity.from_private_bytes(key_file.read_bytes())
+    except FileNotFoundError:
+        pass
+    identity = Identity.generate()
+    # O_EXCL: refuse to reuse a file that appeared meanwhile, which may have other permissions.
+    fd = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(identity.private_bytes)
+    return identity
+
+
 async def connect_loop(
     bridge: Bridge, args: argparse.Namespace, session: aiohttp.ClientSession
 ) -> None:
@@ -217,20 +241,12 @@ async def connect_loop(
         ClientHelloVisualizerSupport,
         VisualizerStatePayload,
     )
-    from aiosendspin.noise.keys import Identity  # noqa: PLC0415
     from aiosendspin.noise.trust_store import FileClientPairingStore  # noqa: PLC0415
 
     state_dir = Path(args.state_dir)
-    state_dir.mkdir(parents=True, exist_ok=True)
-    # A stable identity keeps the same player (and its group) in Music Assistant across restarts.
-    key_file = state_dir / "identity.key"
-    if key_file.exists():
-        identity = Identity.from_private_bytes(key_file.read_bytes())
-    else:
-        identity = Identity.generate()
-        key_file.write_bytes(identity.private_bytes)
-        with contextlib.suppress(OSError):
-            key_file.chmod(0o600)
+    # Private to this user: it holds the bridge's Sendspin private key and pairing secrets.
+    state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    identity = load_or_create_identity(state_dir / "identity.key")
     store = await FileClientPairingStore.open(state_dir / "pairing.json")
     # The bridge only receives sound features, which Music Assistant hands out without pairing.
     await store.store_pairing_config(
