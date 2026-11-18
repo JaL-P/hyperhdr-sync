@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
     from .layout import LedLayout
 
@@ -78,6 +78,20 @@ class Effect(StrEnum):
     SCROLL = "scroll"
     ENERGY = "energy"
     AMBIENT = "ambient"
+    LUMINA = "lumina"
+    """Adaptive brightness: one calm colour whose brightness follows the music."""
+    COLORA = "colora"
+    """Adaptive colour: steady brightness, the colour follows the sound (bass to treble)."""
+    RETRO = "retro"
+    """Segmented level meter with a peak cap, like an old hi-fi."""
+    SCANNER = "scanner"
+    """A light sweeping back and forth with a trail; faster when louder."""
+    RHYTHM = "rhythm"
+    """Colour blocks that swap on every beat."""
+    PARTY = "party"
+    """Random colour bursts on beats, sparkles on the treble."""
+    MANUAL = "manual"
+    """One fixed colour on every LED; does not follow the music."""
 
 
 class Palette(StrEnum):
@@ -90,6 +104,16 @@ class Palette(StrEnum):
     FIRE = "fire"
     FOREST = "forest"
     NEON = "neon"
+    AURORA = "aurora"
+    PASTEL = "pastel"
+    ICE = "ice"
+    CANDY = "candy"
+    LAVA = "lava"
+    WARM = "warm"
+    CLASSIC = "classic"
+    """Green, yellow, red: the colours of a classic level meter."""
+    CUSTOM = "custom"
+    """Shades of the custom colour."""
 
 
 class Response(StrEnum):
@@ -115,7 +139,20 @@ _PALETTE_STOPS: dict[Palette, tuple[_RGB, ...]] = {
     Palette.FIRE: ((255, 0, 0), (255, 80, 0), (255, 190, 20)),
     Palette.FOREST: ((0, 255, 50), (170, 255, 0), (0, 170, 120)),
     Palette.NEON: ((255, 0, 200), (0, 220, 255), (140, 0, 255)),
+    Palette.AURORA: ((0, 255, 140), (0, 140, 255), (170, 0, 255)),
+    Palette.PASTEL: ((255, 150, 200), (150, 190, 255), (170, 255, 200), (255, 225, 150)),
+    Palette.ICE: ((255, 255, 255), (140, 220, 255), (0, 110, 255)),
+    Palette.CANDY: ((255, 50, 160), (130, 80, 255), (0, 220, 220)),
+    Palette.LAVA: ((255, 30, 0), (255, 0, 70), (255, 110, 0)),
+    Palette.WARM: ((255, 110, 25), (255, 165, 70), (255, 70, 15)),
+    Palette.CLASSIC: ((0, 255, 40), (255, 220, 0), (255, 0, 0)),
 }
+
+# Warm white, like a 2700 K bulb: the default custom colour (Manual, Custom, night light).
+DEFAULT_COLOR: tuple[int, int, int] = (255, 147, 41)
+
+# Segments per side of the Retro meter.
+_RETRO_SEGMENTS: int = 12
 # Album palette for artwork without colour: warm white through white to cool white.
 _MONOCHROME_STOPS: tuple[_RGB, ...] = ((255, 170, 90), (255, 255, 255), (160, 195, 255))
 
@@ -131,6 +168,26 @@ class EngineSettings:
     sensitivity_db: float = 0.0
     """Shifts the automatic gain window; positive makes the lights react more."""
     response: Response = Response.BALANCED
+    color: tuple[int, int, int] = DEFAULT_COLOR
+    """Custom colour (RGB 0-255), for the Manual effect, the Custom palette and the night light."""
+
+
+def parse_hex_color(value: str) -> tuple[int, int, int]:
+    """
+    Parse a ``#rrggbb`` colour.
+
+    :param value: The colour, with or without the ``#``.
+    :raises ValueError: When it is not six hexadecimal digits.
+    """
+    digits = value.strip().removeprefix("#")
+    if len(digits) != 6 or any(c not in "0123456789abcdefABCDEF" for c in digits):
+        raise ValueError(f"not a #rrggbb colour: {value!r}")
+    return int(digits[0:2], 16), int(digits[2:4], 16), int(digits[4:6], 16)
+
+
+def hex_color(color: Sequence[int]) -> str:
+    """Return an RGB colour as ``#rrggbb``."""
+    return "#{:02x}{:02x}{:02x}".format(*(max(0, min(255, int(c))) for c in color[:3]))
 
 
 class Engine:
@@ -155,6 +212,18 @@ class Engine:
         self._band_hi = np.minimum(self._band_lo + 1, SPECTRUM_BINS - 1)
         self._band_frac = (band_pos - self._band_lo).astype(np.float32)
         self._comp_db = _a_weight_compensation_db()
+        self._rng = np.random.default_rng(7)
+        retro_segment = np.minimum(
+            (self._pos * _RETRO_SEGMENTS).astype(np.intp), _RETRO_SEGMENTS - 1
+        )
+        self._retro_segment = retro_segment
+        # Gaps between Retro segments only where a segment spans enough LEDs to show one.
+        leds_per_segment = count / 2.0 / _RETRO_SEGMENTS
+        self._retro_gap = (
+            (self._pos * _RETRO_SEGMENTS - retro_segment) > 0.8
+            if leds_per_segment >= 2.0
+            else np.zeros(count, bool)
+        )
         self._album_colors: tuple[_RGB, ...] = ()
         self._lut_linear = np.zeros((_LUT_SIZE, 3), np.float32)
         self._lut_cyclic = np.zeros((_LUT_SIZE, 3), np.float32)
@@ -170,7 +239,9 @@ class Engine:
 
         :param settings: The new settings.
         """
-        palette_changed = settings.palette != self.settings.palette
+        palette_changed = settings.palette != self.settings.palette or (
+            settings.palette == Palette.CUSTOM and settings.color != self.settings.color
+        )
         self.settings = settings
         if palette_changed:
             self._rebuild_palette()
@@ -212,6 +283,17 @@ class Engine:
         self._ripples: list[list[float]] = []
         self._scroll = np.zeros((_SCROLL_LENGTH, 3), np.float32)
         self._scroll_acc = 0.0
+        count = self.layout.count
+        self._lumina = 0.0
+        self._colora = 0.3
+        self._retro = 0.0
+        self._retro_peak = 0.0
+        self._scan_pos = 0.0
+        self._scan_dir = 1.0
+        self._scan_flash = 0.0
+        self._scan_trail = np.zeros((count, 3), np.float32)
+        self._rhythm_step = 0
+        self._party = np.zeros((count, 3), np.float32)
         # ``_time`` and ``_hue`` are deliberately kept so colours do not jump on a seek.
         if not hasattr(self, "_time"):
             self._time = 0.0
@@ -264,29 +346,42 @@ class Engine:
         """
         dt = min(max(dt, 1e-4), 0.25)
         self._advance(dt)
-        match self.settings.effect:
-            case Effect.SPECTRUM:
-                frame = self._fx_spectrum()
-            case Effect.VU:
-                frame = self._fx_vu(dt)
-            case Effect.PULSE:
-                frame = self._fx_pulse()
-            case Effect.RIPPLE:
-                frame = self._fx_ripple(dt)
-            case Effect.SCROLL:
-                frame = self._fx_scroll(dt)
-            case Effect.ENERGY:
-                frame = self._fx_energy()
-            case _:
-                frame = self._fx_ambient()
-        frame = np.clip(frame, 0.0, 1.0) * (
-            self._gate * min(1.0, max(0.0, self.settings.brightness))
-        )
+        effects: dict[Effect, Callable[[], np.ndarray]] = {
+            Effect.SPECTRUM: self._fx_spectrum,
+            Effect.VU: lambda: self._fx_vu(dt),
+            Effect.PULSE: self._fx_pulse,
+            Effect.RIPPLE: lambda: self._fx_ripple(dt),
+            Effect.SCROLL: lambda: self._fx_scroll(dt),
+            Effect.ENERGY: self._fx_energy,
+            Effect.AMBIENT: self._fx_ambient,
+            Effect.LUMINA: lambda: self._fx_lumina(dt),
+            Effect.COLORA: lambda: self._fx_colora(dt),
+            Effect.RETRO: lambda: self._fx_retro(dt),
+            Effect.SCANNER: lambda: self._fx_scanner(dt),
+            Effect.RHYTHM: self._fx_rhythm,
+            Effect.PARTY: lambda: self._fx_party(dt),
+            Effect.MANUAL: lambda: self._solid(1.0),
+        }
+        frame = effects.get(self.settings.effect, self._fx_ambient)()
+        # Manual is a fixed light: it stays on through quiet passages.
+        gate = 1.0 if self.settings.effect == Effect.MANUAL else self._gate
+        frame = np.clip(frame, 0.0, 1.0) * (gate * min(1.0, max(0.0, self.settings.brightness)))
         smooth_tau = _RESPONSE_TAUS[self.settings.response][1]
         if smooth_tau > 0.0:
             self._out += (frame - self._out) * _alpha(dt, smooth_tau)
         else:
             self._out = frame.astype(np.float32)
+        return (self._out * 255.0 + 0.5).astype(np.uint8).tobytes()
+
+    def render_night_light(self, dt: float, level: float) -> bytes:
+        """
+        Render the night light: every LED in the custom colour, fading in from the music.
+
+        :param dt: Seconds since the previous call.
+        :param level: Night light brightness, 0..1 (the effect brightness does not apply).
+        """
+        dt = min(max(dt, 1e-4), 0.25)
+        self._out += (self._solid(min(1.0, max(0.0, level))) - self._out) * _alpha(dt, 0.5)
         return (self._out * 255.0 + 0.5).astype(np.uint8).tobytes()
 
     def render_black(self) -> bytes:
@@ -447,6 +542,93 @@ class Engine:
             1.0, value
         )
 
+    def _fx_lumina(self, dt: float) -> np.ndarray:
+        """One calm colour on every LED; its brightness follows the loudness."""
+        tau = 0.06 if self._level > self._lumina else 0.3
+        self._lumina += (self._level - self._lumina) * _alpha(dt, tau)
+        value = min(1.0, 0.04 + 0.96 * self._lumina**1.3 + 0.12 * self._pulse)
+        color = _sample_wrap(self._lut_cyclic, self._time * 0.01 + self._ring * 0.06)
+        frame: np.ndarray = color * value
+        return frame
+
+    def _fx_colora(self, dt: float) -> np.ndarray:
+        """Steady brightness; the colour slides along the palette with the sound's pitch."""
+        weights = self._bands**2
+        total = float(weights.sum())
+        if total > 1e-3:
+            centroid = float((weights * np.linspace(0.0, 1.0, SPECTRUM_BINS)).sum()) / total
+            target = min(1.0, max(0.0, (centroid - 0.12) / 0.55))
+            self._colora += (target - self._colora) * _alpha(dt, 0.25)
+        at = np.clip(self._colora + (self._ring - 0.5) * 0.12, 0.0, 1.0)
+        value = min(1.0, 0.55 + 0.35 * self._level + 0.2 * self._pulse)
+        return _sample(self._lut_linear, at) * value
+
+    def _fx_retro(self, dt: float) -> np.ndarray:
+        """Segmented level meter up both sides, with a peak cap that drops slowly."""
+        tau = _ATTACK_TAU_S if self._level > self._retro else 0.15
+        self._retro += (self._level - self._retro) * _alpha(dt, tau)
+        lit = round(self._retro * _RETRO_SEGMENTS)
+        self._retro_peak = max(lit / _RETRO_SEGMENTS, self._retro_peak - 0.45 * dt)
+        segment = self._retro_segment
+        colors = _sample(self._lut_linear, segment / (_RETRO_SEGMENTS - 1.0))
+        frame = colors * (segment < lit)[:, None]
+        peak = round(self._retro_peak * _RETRO_SEGMENTS) - 1
+        if peak >= 0:
+            frame[segment == peak] = 0.85
+        frame[self._retro_gap] = 0.0
+        return frame
+
+    def _fx_scanner(self, dt: float) -> np.ndarray:
+        """Sweep a light back and forth with a fading trail; louder is faster, beats flash."""
+        self._scan_pos += self._scan_dir * (0.3 + 1.4 * self._level) * dt
+        if self._scan_pos > 1.0 or self._scan_pos < 0.0:
+            self._scan_dir = -self._scan_dir
+            self._scan_pos = min(1.0, max(0.0, self._scan_pos))
+        if self._new_beat > 0.0:
+            self._scan_flash = self._new_beat
+        self._scan_flash *= math.exp(-dt / 0.2)
+        self._scan_trail *= math.exp(-dt / 0.18)
+        width = 0.03 + 0.05 * self._bass
+        head = np.clip(1.0 - np.abs(self._ring - self._scan_pos) / width, 0.0, 1.0)
+        color = _sample_one(self._lut_cyclic, self._hue)
+        strength = min(1.0, 0.55 + 0.6 * self._level)
+        self._scan_trail = np.maximum(self._scan_trail, head[:, None] * color * strength)
+        frame: np.ndarray = self._scan_trail + color * (0.18 * self._scan_flash)
+        return frame
+
+    def _fx_rhythm(self) -> np.ndarray:
+        """Six colour blocks; every beat swaps which half is lit and moves the colours on."""
+        if self._new_beat > 0.0:
+            self._rhythm_step += 1
+        blocks = 6
+        block = np.minimum((self._ring * blocks).astype(np.intp), blocks - 1)
+        colors = _sample_wrap(self._lut_cyclic, block / blocks * 0.5 + self._rhythm_step * 0.13)
+        lit = (block + self._rhythm_step) % 2 == 0
+        value = np.where(lit, 0.3 + 0.7 * self._pulse, 0.04 + 0.12 * self._level)
+        frame: np.ndarray = colors * value[:, None]
+        return frame
+
+    def _fx_party(self, dt: float) -> np.ndarray:
+        """Random colour bursts on beats and sparkles on the treble, fading out."""
+        count = self.layout.count
+        self._party *= math.exp(-dt / 0.4)
+        if self._new_beat > 0.0:
+            length = max(1, count // 8)
+            for _ in range(3):
+                where = (int(self._rng.integers(count)) + np.arange(length)) % count
+                color = _sample_one(self._lut_cyclic, float(self._rng.random()))
+                self._party[where] = np.maximum(self._party[where], color * self._new_beat)
+        sparkles = int(self._rng.poisson(self._treble * dt * count * 0.6))
+        if sparkles:
+            where = self._rng.integers(0, count, sparkles)
+            self._party[where] = _sample_wrap(self._lut_cyclic, self._rng.random(sparkles))
+        return self._party
+
+    def _solid(self, level: float) -> np.ndarray:
+        """Every LED in the custom colour at ``level``."""
+        color = np.array(self.settings.color, np.float32) / 255.0 * level
+        return np.tile(color, (self.layout.count, 1))
+
     # ---------------------------------------------------------------- palettes
 
     @property
@@ -457,12 +639,15 @@ class Engine:
     def _rebuild_palette(self) -> None:
         """Rebuild both colour lookup tables for the selected palette."""
         self._lut_linear, self._lut_cyclic = _palette_luts(
-            self.settings.palette, self._album_colors
+            self.settings.palette, self._album_colors, self.settings.color
         )
 
 
 def palette_swatch(
-    palette: Palette, album_colors: Iterable[Sequence[int]] = (), count: int = 8
+    palette: Palette,
+    album_colors: Iterable[Sequence[int]] = (),
+    count: int = 8,
+    color: tuple[int, int, int] = DEFAULT_COLOR,
 ) -> list[tuple[int, int, int]]:
     """
     Return colours spread across a palette's gradient, e.g. to show it in a user interface.
@@ -470,9 +655,10 @@ def palette_swatch(
     :param palette: The palette.
     :param album_colors: Artwork colours, used by :attr:`Palette.ALBUM`.
     :param count: How many colours to return.
+    :param color: The custom colour, used by :attr:`Palette.CUSTOM`.
     """
     cleaned = tuple((int(c[0]), int(c[1]), int(c[2])) for c in album_colors if len(c) >= 3)
-    linear, _ = _palette_luts(palette, cleaned)
+    linear, _ = _palette_luts(palette, cleaned, color)
     at = np.linspace(0.0, 1.0, max(count, 2))
     return [
         (int(r * 255 + 0.5), int(g * 255 + 0.5), int(b * 255 + 0.5))
@@ -484,11 +670,13 @@ def palette_swatch(
 
 
 def _palette_luts(
-    palette: Palette, album_colors: tuple[_RGB, ...]
+    palette: Palette, album_colors: tuple[_RGB, ...], color: _RGB = DEFAULT_COLOR
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return the (linear, cyclic) colour lookup tables of a palette."""
     stops: tuple[_RGB, ...] | None = None
-    if palette == Palette.ALBUM:
+    if palette == Palette.CUSTOM:
+        stops = _custom_stops(color)
+    elif palette == Palette.ALBUM:
         # Black-and-white artwork has no colour to show: light it in shades of white
         # rather than the rainbow, whose bass end would turn the LEDs red.
         stops = _vivid_stops(album_colors) or (_MONOCHROME_STOPS if album_colors else None)
@@ -572,6 +760,19 @@ def _sample_one(lut: np.ndarray, at: float) -> np.ndarray:
     size = len(lut)
     color: np.ndarray = lut[size - 1] if at >= 1.0 else lut[int((at % 1.0) * size)]
     return color
+
+
+def _custom_stops(color: _RGB) -> tuple[_RGB, ...]:
+    """Palette stops around the custom colour: its neighbouring hues, at full brightness."""
+    hue, sat, _ = colorsys.rgb_to_hsv(color[0] / 255.0, color[1] / 255.0, color[2] / 255.0)
+    if sat < 0.15:
+        # A white or grey: shades of it would all look the same, so keep it plain.
+        return (color,)
+    shades = []
+    for shift in (-0.05, 0.0, 0.05):
+        r, g, b = colorsys.hsv_to_rgb((hue + shift) % 1.0, sat, 1.0)
+        shades.append((round(r * 255), round(g * 255), round(b * 255)))
+    return tuple(shades)
 
 
 def _vivid_stops(colors: tuple[_RGB, ...]) -> tuple[_RGB, ...] | None:

@@ -41,6 +41,8 @@ GOOD = {
     "sensitivity": 3,
     "response": "smooth",
     "latency_ms": 200,
+    "color": "#ff3b1f",
+    "night_light": 30,
 }
 
 
@@ -69,21 +71,25 @@ async def _client(ui: Any) -> TestClient[web.Request, web.Application]:
 
 def test_parse_settings_checks_values() -> None:
     """Settings from the page are validated and converted to engine settings."""
-    settings, latency = web_ui.parse_settings(GOOD)
-    assert settings == EngineSettings(
+    settings = web_ui.parse_settings(GOOD)
+    assert settings.engine == EngineSettings(
         effect=Effect.PULSE,
         palette=Palette.FIRE,
         brightness=0.6,
         sensitivity_db=3.0,
         response=Response.SMOOTH,
+        color=(255, 59, 31),
     )
-    assert latency == 200
-    assert web_ui.settings_to_dict(settings, latency) == {**GOOD, "sensitivity": 3.0}
+    assert settings.latency_ms == 200
+    assert settings.night_light == 0.3
+    assert web_ui.settings_to_dict(settings) == {**GOOD, "sensitivity": 3.0}
     for bad in (
         {**GOOD, "effect": "strobe"},
         {**GOOD, "brightness": 101},
         {**GOOD, "sensitivity": -13},
         {**GOOD, "latency_ms": "soon"},
+        {**GOOD, "color": "red"},
+        {**GOOD, "night_light": 101},
         {k: v for k, v in GOOD.items() if k != "palette"},
         ["not", "an", "object"],
     ):
@@ -115,6 +121,8 @@ async def test_page_state_and_apply() -> None:
         assert result == {"settings": {**GOOD, "sensitivity": 3.0}, "saved": False}
         assert bridge.engine.settings.effect == Effect.PULSE
         assert bridge.latency_ms == 200
+        assert bridge.night_light == 0.3
+        assert bridge.engine.settings.color == (255, 59, 31)
     finally:
         await client.close()
 
@@ -228,3 +236,34 @@ async def test_applied_settings_are_saved_as_addon_options(
             await supervisor.close()
     assert result["saved"] is True
     assert posted == [{"options": {**options, **GOOD, "sensitivity": 3.0}}]
+
+
+async def test_idle_preview_shows_the_night_light() -> None:
+    """'When idle' previews the night light in the custom colour, or dark when it is off."""
+    bridge = _bridge()
+    client = await _client(web_ui.WebUi(bridge, bridge_module.demo_features))
+
+    async def last_preview(ws: Any, frames: int = 40) -> bytes:
+        preview = b""
+        async with asyncio.timeout(5):
+            for _ in range(frames):
+                message = await ws.receive()
+                while message.type != aiohttp.WSMsgType.BINARY:
+                    message = await ws.receive()
+                preview = message.data[36:]
+        return preview
+
+    try:
+        ws = await client.ws_connect("/api/ws")
+        night = {**GOOD, "color": "#00ff00", "night_light": 50}
+        await ws.send_json({"type": "preview", "settings": night, "mode": "idle"})
+        rgb = await last_preview(ws, 60)
+        assert all(rgb[i] < 5 and rgb[i + 1] > 100 and rgb[i + 2] < 5 for i in range(0, 36, 3))
+        await ws.send_json(
+            {"type": "preview", "settings": {**night, "night_light": 0}, "mode": "idle"}
+        )
+        assert not any(await last_preview(ws, 5))
+        assert bridge.night_light == 0.0, "previewing never changes the real night light"
+        await ws.close()
+    finally:
+        await client.close()

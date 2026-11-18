@@ -10,10 +10,16 @@ configuration:
     description: "Name of the player that appears in Music Assistant."
   effect:
     name: "Effect"
-    description: "spectrum, vu (level meter), pulse, ripple, scroll, energy or ambient."
+    description: "spectrum, vu (level meter), pulse, ripple, scroll, energy, ambient, lumina (adaptive brightness), colora (adaptive colour), retro, scanner, rhythm, party, or manual (the custom colour, not following the music). The web UI previews them."
   palette:
     name: "Colours"
-    description: "album uses the colours of the cover art."
+    description: "album uses the colours of the cover art, classic is green-yellow-red, custom uses shades of the custom colour."
+  color:
+    name: "Custom colour"
+    description: "#rrggbb. Used by the manual effect, the custom colours and the night light."
+  night_light:
+    name: "Night light"
+    description: "Brightness in percent of the custom colour while no music plays. 0 hands the LEDs back to HyperHDR (the screen grabber); above 0 the night light stays on instead."
   brightness:
     name: "Brightness"
     description: "Percent, on top of HyperHDR's own brightness."

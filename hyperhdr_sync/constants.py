@@ -20,6 +20,7 @@ CONF_BRIGHTNESS: Final[str] = "brightness"
 CONF_SENSITIVITY_DB: Final[str] = "sensitivity_db"
 CONF_RESPONSE: Final[str] = "response"
 CONF_LATENCY_MS: Final[str] = "latency_ms"
+CONF_COLOR: Final[str] = "color"
 
 DEFAULT_BRIGHTNESS: Final[int] = 100
 DEFAULT_SENSITIVITY_DB: Final[int] = 0

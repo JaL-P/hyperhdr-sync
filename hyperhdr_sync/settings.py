@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, NamedTuple, cast
 
 from .constants import (
     CONF_BRIGHTNESS,
+    CONF_COLOR,
     CONF_EFFECT,
     CONF_LATENCY_MS,
     CONF_PALETTE,
@@ -15,7 +16,15 @@ from .constants import (
     DEFAULT_LATENCY_MS,
     DEFAULT_SENSITIVITY_DB,
 )
-from .engine import Effect, EngineSettings, Palette, Response
+from .engine import (
+    DEFAULT_COLOR,
+    Effect,
+    EngineSettings,
+    Palette,
+    Response,
+    hex_color,
+    parse_hex_color,
+)
 
 if TYPE_CHECKING:
     from enum import StrEnum
@@ -25,6 +34,7 @@ if TYPE_CHECKING:
 DEFAULT_EFFECT = Effect.SPECTRUM
 DEFAULT_PALETTE = Palette.ALBUM
 DEFAULT_RESPONSE = Response.BALANCED
+DEFAULT_COLOR_HEX = hex_color(DEFAULT_COLOR)
 
 
 class HyperHdrSettings(NamedTuple):
@@ -50,9 +60,18 @@ def get_settings(config: ProviderConfig) -> HyperHdrSettings:
                 cast("int", config.get_value(CONF_SENSITIVITY_DB, DEFAULT_SENSITIVITY_DB))
             ),
             response=_enum(Response, config.get_value(CONF_RESPONSE), DEFAULT_RESPONSE),
+            color=_color(config.get_value(CONF_COLOR)),
         ),
         latency_ms=int(cast("int", config.get_value(CONF_LATENCY_MS, DEFAULT_LATENCY_MS))),
     )
+
+
+def _color(value: object) -> tuple[int, int, int]:
+    """Return a ``#rrggbb`` setting as RGB, or the default colour when it is not one."""
+    try:
+        return parse_hex_color(str(value))
+    except ValueError:
+        return DEFAULT_COLOR
 
 
 def _enum[T: StrEnum](enum: type[T], value: object, default: T) -> T:

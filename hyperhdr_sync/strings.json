@@ -26,12 +26,19 @@
         "ripple": "Ripple: a wave on every beat",
         "scroll": "Scroll: sound colours flowing upwards",
         "energy": "Energy: bass, mids and treble bars",
-        "ambient": "Ambient: calm colours that breathe with the music"
+        "ambient": "Ambient: calm colours that breathe with the music",
+        "lumina": "Lumina: one calm colour, brighter when louder (adaptive brightness)",
+        "colora": "Colora: the colour follows the sound, bass to treble (adaptive colour)",
+        "retro": "Retro: segmented level meter with a peak cap",
+        "scanner": "Scanner: a light sweeping back and forth, faster when louder",
+        "rhythm": "Rhythm: colour blocks that swap on every beat",
+        "party": "Party: random colour bursts on beats",
+        "manual": "Manual: every LED in the custom colour, not following the music"
       }
     },
     "palette": {
       "label": "Colours",
-      "description": "Colours used by the effect. Album artwork follows the cover of the current track and falls back to rainbow when a cover has no usable colours.",
+      "description": "Colours used by the effect. Album artwork follows the cover of the current track (shades of white for black-and-white covers, rainbow without a cover).",
       "options": {
         "album": "Album artwork",
         "rainbow": "Rainbow",
@@ -39,7 +46,15 @@
         "ocean": "Ocean",
         "fire": "Fire",
         "forest": "Forest",
-        "neon": "Neon"
+        "neon": "Neon",
+        "aurora": "Aurora",
+        "pastel": "Pastel",
+        "ice": "Ice",
+        "candy": "Candy",
+        "lava": "Lava",
+        "warm": "Warm",
+        "classic": "Classic: green, yellow, red",
+        "custom": "Shades of the custom colour"
       }
     },
     "brightness": {
@@ -62,6 +77,10 @@
     "latency_ms": {
       "label": "Light timing (ms)",
       "description": "Makes the lights react slightly earlier so they stay in step with your speaker. Increase if the lights lag the music."
+    },
+    "color": {
+      "label": "Custom colour",
+      "description": "Colour as #rrggbb, used by the Manual effect and the custom colours palette. Default warm white #ff9329."
     }
   },
   "setup_flow": {

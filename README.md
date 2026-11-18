@@ -65,8 +65,10 @@ Useful options (`--help` lists all):
 | Option | Meaning |
 |---|---|
 | `--demo` | Play a built-in test beat on the LEDs, without Music Assistant |
-| `--effect` | `spectrum`, `vu`, `pulse`, `ripple`, `scroll`, `energy`, `ambient` |
-| `--palette` | `album` (cover colours), `rainbow`, `sunset`, `ocean`, `fire`, `forest`, `neon` |
+| `--effect` | `lumina`, `colora`, `spectrum`, `retro`, `scanner`, `rhythm`, `party`, `vu`, `pulse`, `ripple`, `scroll`, `energy`, `ambient`, `manual` |
+| `--palette` | `album` (cover colours), `custom` (shades of `--color`), `rainbow`, `classic`, `sunset`, `ocean`, `aurora`, `ice`, `fire`, `lava`, `warm`, `forest`, `neon`, `candy`, `pastel` |
+| `--color` | Custom colour `#rrggbb` for `manual`, `custom` and the night light (default warm white) |
+| `--night-light` | 0-100: glow in the custom colour while no music plays, instead of handing the LEDs back to HyperHDR |
 | `--brightness` | Percent, on top of HyperHDR's own brightness |
 | `--sensitivity` | dB, -12..12. Raise it if the lights look flat |
 | `--response` | `snappy`, `balanced`, `smooth` |
@@ -108,6 +110,13 @@ off while Music Assistant starts, and re-reads the layout when music starts.
 
 | Effect | What you see |
 |---|---|
+| Lumina | Adaptive brightness: one calm colour on every LED, brighter when the music is louder |
+| Colora | Adaptive colour: steady brightness, the colour slides along the palette with the sound, bass to treble |
+| Retro | A segmented level meter with a peak cap, like an old hi-fi (try the Classic colours) |
+| Scanner | A light sweeping back and forth with a trail; faster when louder, flashing on beats |
+| Rhythm | Colour blocks that swap on every beat |
+| Party | Random colour bursts on beats and sparkles on the treble |
+| Manual | Every LED in the custom colour; does not follow the music |
 | Spectrum | Bass at the bottom of both sides, rising to treble at top-centre |
 | Level meter | Loudness climbing both sides, with a falling peak marker |
 | Pulse | All LEDs breathe with the bass and flash on beats; the colour steps on each beat |

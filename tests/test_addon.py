@@ -84,4 +84,6 @@ def test_options_parse_as_bridge_arguments() -> None:
     assert args.state_dir == "/data/bridge"
     assert args.sensitivity == 0.0
     assert args.log_level == "INFO"
+    assert args.color == (255, 147, 41)
+    assert args.night_light == 0
     assert args.token is None

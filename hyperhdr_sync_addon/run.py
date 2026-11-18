@@ -26,6 +26,8 @@ _FLAGS = {
     "sensitivity": "--sensitivity",
     "response": "--response",
     "latency_ms": "--latency-ms",
+    "color": "--color",
+    "night_light": "--night-light",
 }
 
 

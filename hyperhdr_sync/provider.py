@@ -13,6 +13,7 @@ from music_assistant.models.plugin import PluginProvider
 from .bridge import HyperHdrBridge
 from .constants import (
     CONF_BRIGHTNESS,
+    CONF_COLOR,
     CONF_EFFECT,
     CONF_HOST,
     CONF_LATENCY_MS,
@@ -38,7 +39,13 @@ from .hyperhdr import (
     fetch_serverinfo,
 )
 from .layout import LedLayout
-from .settings import DEFAULT_EFFECT, DEFAULT_PALETTE, DEFAULT_RESPONSE, get_settings
+from .settings import (
+    DEFAULT_COLOR_HEX,
+    DEFAULT_EFFECT,
+    DEFAULT_PALETTE,
+    DEFAULT_RESPONSE,
+    get_settings,
+)
 
 if TYPE_CHECKING:
     from music_assistant_models.config_entries import ProviderConfig
@@ -46,6 +53,7 @@ if TYPE_CHECKING:
     from music_assistant.providers.sendspin.provider import SendspinProvider
 
 _SETTINGS_KEYS = (
+    CONF_COLOR,
     CONF_EFFECT,
     CONF_PALETTE,
     CONF_BRIGHTNESS,
@@ -111,6 +119,13 @@ class HyperHdrProvider(PluginProvider):
                 type=ConfigEntryType.INTEGER,
                 default_value=DEFAULT_LATENCY_MS,
                 range=(0, 2000),
+                immediate_apply=True,
+                category="settings",
+            ),
+            ConfigEntry(
+                key=CONF_COLOR,
+                type=ConfigEntryType.STRING,
+                default_value=DEFAULT_COLOR_HEX,
                 immediate_apply=True,
                 category="settings",
             ),

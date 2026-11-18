@@ -44,3 +44,33 @@ async def test_stopping_blacks_out_the_leds(tmp_path: Path) -> None:
         await fake.stop()
     assert any(any(frame) for frame in fake.frames)
     assert fake.frames[-3:] == [bytes(len(LEDS) * 3)] * 3
+
+
+async def test_night_light_keeps_the_leds_while_idle() -> None:
+    """With a night light, the idle bridge keeps sending the custom colour; without, it stops."""
+    from hyperhdr_sync.engine import Engine, EngineSettings  # noqa: PLC0415
+    from hyperhdr_sync.layout import LedLayout  # noqa: PLC0415
+
+    class Sender:
+        def __init__(self) -> None:
+            self.frames: list[bytes] = []
+
+        def send(self, rgb: bytes) -> None:
+            self.frames.append(rgb)
+
+    for night_light in (0.5, 0.0):
+        sender = Sender()
+        engine = Engine(LedLayout.strip(10), EngineSettings(color=(0, 0, 255)))
+        idle = bridge.Bridge(engine, sender, 120, night_light)
+        task = asyncio.create_task(idle.render_loop())
+        await asyncio.sleep(2.5)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        if night_light:
+            assert len(sender.frames) > 40
+            last = sender.frames[-1]
+            assert last[2] > 100
+            assert last[0] == last[1] == 0
+        else:
+            assert sender.frames == []

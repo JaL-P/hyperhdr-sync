@@ -44,6 +44,8 @@ from hyperhdr_sync.engine import (
     EngineSettings,
     Palette,
     Response,
+    hex_color,
+    parse_hex_color,
 )
 from hyperhdr_sync.hyperhdr import (
     DEFAULT_UDP_PORT,
@@ -75,17 +77,26 @@ DEFAULT_STATE_DIR = Path.home() / ".hyperhdr-sync-bridge"
 class Bridge:
     """Receives visualizer features from Music Assistant and renders them to HyperHDR."""
 
-    def __init__(self, engine: Engine, sender: HyperHdrUdpSender, latency_ms: int) -> None:
+    def __init__(
+        self,
+        engine: Engine,
+        sender: HyperHdrUdpSender,
+        latency_ms: int,
+        night_light: float = 0.0,
+    ) -> None:
         """
         Initialize the bridge.
 
         :param engine: The rendering engine for the LEDs.
         :param sender: Opened sender for HyperHDR's UDP raw receiver.
         :param latency_ms: How far ahead of the music the lights are rendered.
+        :param night_light: Brightness (0..1) of the custom colour shown while no music
+            plays; 0 hands the LEDs back to HyperHDR instead.
         """
         self.engine = engine
         self.sender = sender
         self.latency_us = latency_ms * 1000
+        self.night_light = night_light
         self.client: SendspinClient | None = None
         self.streaming = False
         # A second engine with settings that are being tried out in the web UI. It gets
@@ -103,23 +114,28 @@ class Bridge:
         """How far ahead of the music the lights are rendered."""
         return self.latency_us // 1000
 
-    def apply(self, settings: EngineSettings, latency_ms: int) -> None:
+    def apply(self, settings: EngineSettings, latency_ms: int, night_light: float) -> None:
         """
         Switch the LEDs to new settings, keeping the audio state.
 
         :param settings: The new rendering settings.
         :param latency_ms: How far ahead of the music to render.
+        :param night_light: Night light brightness, 0..1 (0: off).
         """
         self.engine.update_settings(settings)
         self.latency_us = latency_ms * 1000
+        self.night_light = night_light
         LOGGER.info(
-            "Settings applied: %s, %s colours, brightness %d%%, sensitivity %+.0f dB, %s, %d ms",
+            "Settings applied: %s, %s colours, brightness %d%%, sensitivity %+.0f dB, %s, "
+            "%d ms, colour %s, night light %d%%",
             settings.effect,
             settings.palette,
             round(settings.brightness * 100),
             settings.sensitivity_db,
             settings.response,
             latency_ms,
+            hex_color(settings.color),
+            round(night_light * 100),
         )
 
     def start_preview(self) -> Engine:
@@ -229,6 +245,10 @@ class Bridge:
                         self._stats,
                     )
                     self._stats = {"frames": 0, "beats": 0, "peak": 0}
+            elif self.night_light > 0.0:
+                # Keep the LEDs (instead of HyperHDR's grabber) and glow in the custom colour.
+                self._send(self.engine.render_night_light(dt, self.night_light))
+                blackouts_left = 3
             elif blackouts_left > 0:
                 # HyperHDR hands the LEDs back to its other sources 3 seconds after the last frame.
                 self._send(self.engine.render_black())
@@ -429,8 +449,9 @@ async def run(args: argparse.Namespace) -> None:
             brightness=args.brightness / 100.0,
             sensitivity_db=args.sensitivity,
             response=Response(args.response),
+            color=args.color,
         )
-        bridge = Bridge(Engine(layout, settings), sender, args.latency_ms)
+        bridge = Bridge(Engine(layout, settings), sender, args.latency_ms, args.night_light / 100.0)
         # Stop as cleanly on SIGTERM (a service or container stopping) as on Ctrl+C.
         task = asyncio.current_task()
         if task is not None and hasattr(signal, "SIGTERM"):
@@ -506,6 +527,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--latency-ms", type=int, default=120, help="render this far ahead of the music"
+    )
+    parser.add_argument(
+        "--color",
+        type=parse_hex_color,
+        default="#ff9329",
+        help="custom colour #rrggbb, for the manual effect, the custom palette and the night light",
+    )
+    parser.add_argument(
+        "--night-light",
+        type=int,
+        default=0,
+        choices=range(101),
+        metavar="0-100",
+        help="while no music plays, glow in the custom colour at this brightness in percent "
+        "instead of handing the LEDs back to HyperHDR (0: off)",
     )
     parser.add_argument(
         "--state-dir", default=str(DEFAULT_STATE_DIR), help="where the bridge keeps its identity"

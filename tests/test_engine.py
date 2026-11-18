@@ -10,6 +10,9 @@ from hyperhdr_sync.engine import (
     EngineSettings,
     Palette,
     Response,
+    hex_color,
+    palette_swatch,
+    parse_hex_color,
 )
 from hyperhdr_sync.layout import LedLayout
 
@@ -88,8 +91,8 @@ def test_fallback_strip_layout() -> None:
     assert layout.x.max() <= 1.0
 
 
-@pytest.mark.parametrize("effect", list(Effect))
-@pytest.mark.parametrize("palette", [Palette.RAINBOW, Palette.FIRE, Palette.ALBUM])
+@pytest.mark.parametrize("effect", [effect for effect in Effect if effect != Effect.MANUAL])
+@pytest.mark.parametrize("palette", [Palette.RAINBOW, Palette.FIRE, Palette.ALBUM, Palette.CUSTOM])
 def test_every_effect_lights_up_with_music_and_goes_dark_in_silence(
     effect: Effect, palette: Palette
 ) -> None:
@@ -223,3 +226,47 @@ def test_odd_input_does_not_break_rendering() -> None:
     single = Engine(LedLayout.strip(1), EngineSettings(effect=Effect.RIPPLE))
     single.feed(spectrum=[LOUD] * SPECTRUM_BINS, onset=200)
     assert len(single.render(DT)) == 3
+
+
+def test_manual_shows_the_custom_colour_without_music() -> None:
+    """Manual lights every LED in the custom colour at the set brightness, music or not."""
+    engine = Engine(
+        _tv_layout(),
+        EngineSettings(effect=Effect.MANUAL, color=(255, 100, 0), brightness=0.5),
+    )
+    frame = np.zeros((1, 3), np.uint8)
+    for _ in range(int(2 / DT)):
+        frame = np.frombuffer(engine.render(DT), np.uint8).reshape(-1, 3)
+    assert (np.abs(frame.astype(int) - [128, 50, 0]) <= 1).all()
+
+
+def test_custom_palette_follows_the_custom_colour() -> None:
+    """The Custom palette is built from the custom colour, and follows a change of it."""
+    blue = palette_swatch(Palette.CUSTOM, color=(0, 80, 255))
+    assert all(b > r for r, _, b in blue)
+    engine = Engine(_tv_layout(), EngineSettings(effect=Effect.LUMINA, palette=Palette.CUSTOM))
+    engine.update_settings(
+        EngineSettings(effect=Effect.LUMINA, palette=Palette.CUSTOM, color=(0, 255, 0))
+    )
+    frame = _settle(engine, [LOUD] * SPECTRUM_BINS, frames=60).astype(int)
+    assert frame[:, 1].sum() > 3 * frame[:, 0].sum()
+
+
+def test_night_light_fades_to_the_custom_colour() -> None:
+    """The night light fades from the music to the custom colour at its own brightness."""
+    engine = Engine(_tv_layout(), EngineSettings(color=(255, 147, 41), brightness=0.2))
+    _play(engine, 1.0)
+    frame = np.zeros((1, 3), np.uint8)
+    for _ in range(int(4 / DT)):
+        frame = np.frombuffer(engine.render_night_light(DT, 0.4), np.uint8).reshape(-1, 3)
+    assert (np.abs(frame.astype(int) - [102, 59, 16]) <= 1).all()
+
+
+def test_hex_colours_round_trip() -> None:
+    """Custom colours are read and written as #rrggbb."""
+    assert parse_hex_color("#FF9329") == (255, 147, 41)
+    assert parse_hex_color("00ff00") == (0, 255, 0)
+    assert hex_color((255, 147, 41)) == "#ff9329"
+    for bad in ("#fff", "red", "#gg0000"):
+        with pytest.raises(ValueError):  # noqa: PT011
+            parse_hex_color(bad)

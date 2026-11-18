@@ -28,6 +28,8 @@ options:
   sensitivity: 0
   response: "balanced"
   latency_ms: 120
+  color: "#ff9329"
+  night_light: 0
   udp_port: 5568
   web_port: 8090
   log_level: "info"
@@ -36,12 +38,14 @@ schema:
   # no default: the add-on does not start until this is filled in
   hyperhdr_host: "str"
   name: "str"
-  effect: "list(spectrum|vu|pulse|ripple|scroll|energy|ambient)"
-  palette: "list(album|rainbow|sunset|ocean|fire|forest|neon)"
+  effect: "list(spectrum|vu|pulse|ripple|scroll|energy|ambient|lumina|colora|retro|scanner|rhythm|party|manual)"
+  palette: "list(album|rainbow|sunset|ocean|fire|forest|neon|aurora|pastel|ice|candy|lava|warm|classic|custom)"
   brightness: "int(0,100)"
   sensitivity: "float(-12,12)"
   response: "list(snappy|balanced|smooth)"
   latency_ms: "int(0,2000)"
+  color: "match(^#[0-9a-fA-F]{6}$)"
+  night_light: "int(0,100)"
   udp_port: "port"
   web_port: "port"
   token: "password?"

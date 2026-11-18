@@ -21,6 +21,7 @@ import logging
 import os
 import socket
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
@@ -28,7 +29,15 @@ from urllib.parse import urlsplit
 import aiohttp
 from aiohttp import web
 
-from hyperhdr_sync.engine import Effect, EngineSettings, Palette, Response, palette_swatch
+from hyperhdr_sync.engine import (
+    Effect,
+    EngineSettings,
+    Palette,
+    Response,
+    hex_color,
+    palette_swatch,
+    parse_hex_color,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -45,23 +54,39 @@ UI_RATE_HZ = 25
 SUPERVISOR_URL = "http://supervisor"
 _SUPERVISOR_TIMEOUT_S = 10.0
 
+# (label, short description) per effect, in the order the page shows them.
 EFFECT_LABELS = {
-    Effect.SPECTRUM: "Spectrum",
-    Effect.VU: "Level meter",
-    Effect.PULSE: "Pulse",
-    Effect.RIPPLE: "Ripple",
-    Effect.SCROLL: "Scroll",
-    Effect.ENERGY: "Energy",
-    Effect.AMBIENT: "Ambient",
+    Effect.LUMINA: ("Lumina", "Adaptive brightness: one calm colour, brighter when louder"),
+    Effect.COLORA: ("Colora", "Adaptive colour: the colour follows the sound, bass to treble"),
+    Effect.SPECTRUM: ("Spectrum", "Bass at the bottom rising to treble at the top"),
+    Effect.RETRO: ("Retro", "Segmented level meter with a peak cap, like an old hi-fi"),
+    Effect.SCANNER: ("Scanner", "A light sweeping back and forth, faster when louder"),
+    Effect.RHYTHM: ("Rhythm", "Colour blocks that swap on every beat"),
+    Effect.PARTY: ("Party", "Random colour bursts on beats, sparkles on the treble"),
+    Effect.VU: ("Level meter", "Loudness climbing both sides with a falling peak"),
+    Effect.PULSE: ("Pulse", "Everything breathes with the bass and flashes on beats"),
+    Effect.RIPPLE: ("Ripple", "A wave from the bottom to the top on every beat"),
+    Effect.SCROLL: ("Scroll", "The colour of the sound flowing upwards"),
+    Effect.ENERGY: ("Energy", "Bars for bass, mids and treble"),
+    Effect.AMBIENT: ("Ambient", "Slowly turning colours that breathe with the music"),
+    Effect.MANUAL: ("Manual", "Every LED in the custom colour; does not follow the music"),
 }
 PALETTE_LABELS = {
     Palette.ALBUM: "Album art",
+    Palette.CUSTOM: "Custom colour",
     Palette.RAINBOW: "Rainbow",
+    Palette.CLASSIC: "Classic",
     Palette.SUNSET: "Sunset",
     Palette.OCEAN: "Ocean",
+    Palette.AURORA: "Aurora",
+    Palette.ICE: "Ice",
     Palette.FIRE: "Fire",
+    Palette.LAVA: "Lava",
+    Palette.WARM: "Warm",
     Palette.FOREST: "Forest",
     Palette.NEON: "Neon",
+    Palette.CANDY: "Candy",
+    Palette.PASTEL: "Pastel",
 }
 RESPONSE_LABELS = {
     Response.SNAPPY: "Snappy",
@@ -72,31 +97,43 @@ RESPONSE_LABELS = {
 BRIGHTNESS_RANGE = (0, 100)
 SENSITIVITY_RANGE = (-12.0, 12.0)
 LATENCY_RANGE = (0, 2000)
+NIGHT_LIGHT_RANGE = (0, 100)
 
 
-def settings_to_dict(settings: EngineSettings, latency_ms: int) -> dict[str, Any]:
+@dataclass(frozen=True)
+class UiSettings:
+    """Everything the page can change."""
+
+    engine: EngineSettings
+    latency_ms: int
+    night_light: float
+    """Night light brightness, 0..1 (0: hand the LEDs back to HyperHDR when idle)."""
+
+
+def settings_to_dict(settings: UiSettings) -> dict[str, Any]:
     """
     Return settings with the names and units of the add-on options and the page.
 
-    :param settings: Rendering settings.
-    :param latency_ms: How far ahead of the music the lights are rendered.
+    :param settings: The settings.
     """
+    engine = settings.engine
     return {
-        "effect": settings.effect.value,
-        "palette": settings.palette.value,
-        "brightness": round(settings.brightness * 100),
-        "sensitivity": float(settings.sensitivity_db),
-        "response": settings.response.value,
-        "latency_ms": int(latency_ms),
+        "effect": engine.effect.value,
+        "palette": engine.palette.value,
+        "brightness": round(engine.brightness * 100),
+        "sensitivity": float(engine.sensitivity_db),
+        "response": engine.response.value,
+        "latency_ms": int(settings.latency_ms),
+        "color": hex_color(engine.color),
+        "night_light": round(settings.night_light * 100),
     }
 
 
-def parse_settings(data: Any) -> tuple[EngineSettings, int]:
+def parse_settings(data: Any) -> UiSettings:
     """
     Validate settings sent by the page.
 
     :param data: Mapping with the keys of :func:`settings_to_dict`.
-    :return: Rendering settings and latency in milliseconds.
     :raises ValueError: When a value is missing, unknown or out of range.
     """
     if not isinstance(data, dict):
@@ -108,23 +145,27 @@ def parse_settings(data: Any) -> tuple[EngineSettings, int]:
         brightness = int(data["brightness"])
         sensitivity = float(data["sensitivity"])
         latency_ms = int(data["latency_ms"])
+        color = parse_hex_color(str(data["color"]))
+        night_light = int(data["night_light"])
     except (KeyError, TypeError) as err:
         raise ValueError(f"missing or invalid setting: {err}") from err
     for name, value, (low, high) in (
         ("brightness", brightness, BRIGHTNESS_RANGE),
         ("sensitivity", sensitivity, SENSITIVITY_RANGE),
         ("latency_ms", latency_ms, LATENCY_RANGE),
+        ("night_light", night_light, NIGHT_LIGHT_RANGE),
     ):
         if not low <= value <= high:
             raise ValueError(f"{name} must be between {low} and {high}")
-    settings = EngineSettings(
+    engine = EngineSettings(
         effect=effect,
         palette=palette,
         brightness=brightness / 100.0,
         sensitivity_db=sensitivity,
         response=response,
+        color=color,
     )
-    return settings, latency_ms
+    return UiSettings(engine, latency_ms, night_light / 100.0)
 
 
 class WebUi:
@@ -153,8 +194,12 @@ class WebUi:
         self._allowed_remote = allowed_remote
         self._clients: set[web.WebSocketResponse] = set()
         self._ticker: asyncio.Task[None] | None = None
-        self._swatch_key: tuple[tuple[int, int, int], ...] | None = None
+        self._swatch_key: tuple[object, ...] | None = None
         self._swatches: list[dict[str, Any]] = []
+        # What the preview shows: "music" (the music, or the test beat while nothing
+        # plays) or "idle" (what the LEDs do once the music stops: the night light).
+        self._preview_mode = "music"
+        self._preview_night_light = bridge.night_light
 
     def make_app(self) -> web.Application:
         """Return the aiohttp application."""
@@ -207,7 +252,10 @@ class WebUi:
                     "y": [round(float(v), 4) for v in layout.y],
                 },
                 "settings": self._current(),
-                "effects": [{"id": e.value, "label": label} for e, label in EFFECT_LABELS.items()],
+                "effects": [
+                    {"id": e.value, "label": label, "description": description}
+                    for e, (label, description) in EFFECT_LABELS.items()
+                ],
                 "palettes": self._palettes(),
                 "responses": [
                     {"id": r.value, "label": label} for r, label in RESPONSE_LABELS.items()
@@ -216,6 +264,7 @@ class WebUi:
                     "brightness": BRIGHTNESS_RANGE,
                     "sensitivity": SENSITIVITY_RANGE,
                     "latency_ms": LATENCY_RANGE,
+                    "night_light": NIGHT_LIGHT_RANGE,
                 },
                 "playing": self._bridge.streaming,
                 "saves": self._saver is not None,
@@ -224,12 +273,13 @@ class WebUi:
 
     async def _apply(self, request: web.Request) -> web.Response:
         try:
-            settings, latency_ms = parse_settings(await request.json())
+            settings = parse_settings(await request.json())
         except (ValueError, json.JSONDecodeError) as err:
             return web.json_response({"error": str(err)}, status=400)
-        self._bridge.apply(settings, latency_ms)
+        self._bridge.apply(settings.engine, settings.latency_ms, settings.night_light)
         if self._bridge.preview is not None:
-            self._bridge.preview.update_settings(settings)
+            self._bridge.preview.update_settings(settings.engine)
+        self._preview_night_light = settings.night_light
         result: dict[str, Any] = {"settings": self._current(), "saved": False}
         if self._saver is not None:
             try:
@@ -267,11 +317,14 @@ class WebUi:
             data = json.loads(text)
             if not isinstance(data, dict) or data.get("type") != "preview":
                 return
-            settings, _ = parse_settings(data.get("settings"))
+            settings = parse_settings(data.get("settings"))
         except (ValueError, json.JSONDecodeError) as err:
             await ws.send_json({"type": "error", "message": str(err)})
             return
-        self._bridge.start_preview().update_settings(settings)
+        self._bridge.start_preview().update_settings(settings.engine)
+        self._preview_night_light = settings.night_light
+        if data.get("mode") in ("music", "idle"):
+            self._preview_mode = data["mode"]
 
     async def _on_shutdown(self, _app: web.Application) -> None:
         for ws in list(self._clients):
@@ -298,13 +351,24 @@ class WebUi:
             preview = self._bridge.preview
             if preview is None:
                 continue
-            if not self._bridge.streaming:
-                loudness, spectrum, beat = self._demo(now - start)
-                preview.feed(
-                    loudness=loudness, spectrum=spectrum, onset=200 if beat != last_beat else None
+            if self._preview_mode == "idle":
+                # Without a night light the LEDs go back to HyperHDR: shown as dark.
+                preview_rgb = (
+                    preview.render_night_light(dt, self._preview_night_light)
+                    if self._preview_night_light > 0.0
+                    else preview.render_black()
                 )
-                last_beat = beat
-            frame = self._bridge.last_rgb + preview.render(dt)
+            else:
+                if not self._bridge.streaming:
+                    loudness, spectrum, beat = self._demo(now - start)
+                    preview.feed(
+                        loudness=loudness,
+                        spectrum=spectrum,
+                        onset=200 if beat != last_beat else None,
+                    )
+                    last_beat = beat
+                preview_rgb = preview.render(dt)
+            frame = self._bridge.last_rgb + preview_rgb
             current = {"type": "status", "playing": self._bridge.streaming}
             current["palettes"] = self._palettes()
             for ws in list(self._clients):
@@ -317,20 +381,22 @@ class WebUi:
     # --------------------------------------------------------------- helpers
 
     def _current(self) -> dict[str, Any]:
-        return settings_to_dict(self._bridge.engine.settings, self._bridge.latency_ms)
+        bridge = self._bridge
+        return settings_to_dict(
+            UiSettings(bridge.engine.settings, bridge.latency_ms, bridge.night_light)
+        )
 
     def _palettes(self) -> list[dict[str, Any]]:
         """Return the palettes with sample colours; the album one follows the artwork."""
         album = self._bridge.engine.album_colors
-        if album != self._swatch_key:
-            self._swatch_key = album
+        color = self._bridge.engine.settings.color
+        if (album, color) != self._swatch_key:
+            self._swatch_key = (album, color)
             self._swatches = [
                 {
                     "id": palette.value,
                     "label": label,
-                    "colors": [
-                        f"#{r:02x}{g:02x}{b:02x}" for r, g, b in palette_swatch(palette, album)
-                    ],
+                    "colors": [hex_color(c) for c in palette_swatch(palette, album, color=color)],
                 }
                 for palette, label in PALETTE_LABELS.items()
             ]

@@ -111,7 +111,26 @@
   .slider { display: grid; grid-template-columns: 1fr 76px; gap: 14px; align-items: center; max-width: 560px; }
   .slider output { font-variant-numeric: tabular-nums; text-align: right; color: var(--muted); }
   input[type=range] { width: 100%; accent-color: var(--accent); }
-  .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .hint:empty { display: none; }
+  .stage-foot { color: var(--muted); font-size: 12.5px; margin: 10px 2px 0; min-height: 18px; }
+  .seg { display: inline-flex; background: var(--chip); border-radius: 9px; padding: 3px; gap: 2px; }
+  .seg button {
+    appearance: none; border: 0; background: transparent; color: var(--muted); font: inherit;
+    font-size: 12.5px; padding: 4px 10px; border-radius: 7px; cursor: pointer;
+  }
+  .seg button[aria-pressed="true"] { background: var(--card); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.15); }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .color-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  input[type=color] {
+    width: 52px; height: 36px; padding: 0; border: 1px solid var(--line); border-radius: 9px;
+    background: var(--chip); cursor: pointer;
+  }
+  input[type=color]::-webkit-color-swatch-wrapper { padding: 4px; }
+  input[type=color]::-webkit-color-swatch { border: 0; border-radius: 6px; }
+  .preset { width: 30px; height: 30px; padding: 0; border-radius: 50%; border: 2px solid var(--card); box-shadow: 0 0 0 1px var(--line); cursor: pointer; }
+  .preset[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent); }
+  .preset:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   .bar {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
@@ -154,30 +173,51 @@
       </div>
     </div>
     <div class="card stage preview">
-      <div class="stage-head"><h2>Preview</h2><span id="preview-note"></span></div>
+      <div class="stage-head">
+        <h2>Preview</h2>
+        <div class="seg" id="modes" role="group" aria-label="What the preview shows">
+          <button type="button" data-mode="music" aria-pressed="true">With music</button>
+          <button type="button" data-mode="idle" aria-pressed="false">When idle</button>
+        </div>
+      </div>
       <div class="screen-wrap">
         <canvas id="preview" aria-label="Preview of the selected settings"></canvas>
       </div>
+      <div class="stage-foot" id="preview-note"></div>
     </div>
   </section>
 
   <section class="card controls" id="controls" aria-label="Settings">
     <div class="group">
       <div class="label">Effect</div>
-      <div class="chips" id="effects" role="group" aria-label="Effect"></div>
+      <div><div class="chips" id="effects" role="group" aria-label="Effect"></div>
+      <div class="hint" id="effect-desc"></div></div>
     </div>
     <div class="group">
       <div class="label">Colours<small>Album art follows the cover of the current track</small></div>
-      <div class="chips" id="palettes" role="group" aria-label="Colours"></div>
+      <div><div class="chips" id="palettes" role="group" aria-label="Colours"></div>
+      <div class="hint" id="palette-note"></div></div>
+    </div>
+    <div class="group">
+      <div class="label">Custom colour<small>For Manual, Custom colour and the night light</small></div>
+      <div class="color-row">
+        <input type="color" id="color" aria-label="Custom colour">
+        <div class="chips" id="color-presets" role="group" aria-label="Colour presets"></div>
+      </div>
+    </div>
+    <div class="group">
+      <div class="label">Night light<small>When no music plays</small></div>
+      <div><div class="slider"><input type="range" id="night_light" step="1" aria-label="Night light brightness"><output for="night_light" id="night_light-out"></output></div>
+      <div class="hint">Off hands the LEDs back to HyperHDR (its screen grabber). On keeps them glowing in the custom colour, so the TV picture is not shown on the LEDs. Use "When idle" above to preview it.</div></div>
     </div>
     <div class="group">
       <div class="label">Brightness</div>
-      <div><div class="slider"><input type="range" id="brightness" step="1"><output for="brightness" id="brightness-out"></output></div>
+      <div><div class="slider"><input type="range" id="brightness" step="1" aria-label="Brightness"><output for="brightness" id="brightness-out"></output></div>
       <div class="hint">On top of HyperHDR's own brightness.</div></div>
     </div>
     <div class="group">
       <div class="label">Sensitivity</div>
-      <div><div class="slider"><input type="range" id="sensitivity" step="1"><output for="sensitivity" id="sensitivity-out"></output></div>
+      <div><div class="slider"><input type="range" id="sensitivity" step="1" aria-label="Sensitivity"><output for="sensitivity" id="sensitivity-out"></output></div>
       <div class="hint">Raise it if the lights look flat, lower it if they stay bright.</div></div>
     </div>
     <div class="group">
@@ -186,7 +226,7 @@
     </div>
     <div class="group">
       <div class="label">Latency</div>
-      <div><div class="slider"><input type="range" id="latency_ms" step="10"><output for="latency_ms" id="latency_ms-out"></output></div>
+      <div><div class="slider"><input type="range" id="latency_ms" step="10" aria-label="Latency"><output for="latency_ms" id="latency_ms-out"></output></div>
       <div class="hint">How far the lights run ahead of the music. Raise it if they lag. Not shown in the preview; it takes effect on Apply.</div></div>
     </div>
   </section>
@@ -203,12 +243,36 @@
 <script>
 "use strict";
 (() => {
-  const KEYS = ["effect", "palette", "brightness", "sensitivity", "response", "latency_ms"];
+  const KEYS = ["effect", "palette", "brightness", "sensitivity", "response", "latency_ms", "color", "night_light"];
+  const SLIDERS = ["brightness", "sensitivity", "latency_ms", "night_light"];
+  const PRESETS = [
+    ["#ff9329", "Warm white"], ["#fff4e5", "Soft white"], ["#ffffff", "Cool white"],
+    ["#ff3b1f", "Red"], ["#ff8a00", "Amber"], ["#2bff6a", "Green"],
+    ["#00c8ff", "Sky"], ["#3a4bff", "Blue"], ["#b14bff", "Purple"], ["#ff3fa4", "Pink"],
+  ];
   const $ = (id) => document.getElementById(id);
   const ui = {
-    leds: null, applied: null, pending: null, palettes: [], playing: false, saves: false,
-    live: null, preview: null, connected: false, message: null,
+    leds: null, applied: null, pending: null, palettes: [], effects: [], playing: false,
+    saves: false, live: null, preview: null, connected: false, message: null, mode: "music",
   };
+
+  // Shades of the custom colour, as the Custom colour palette builds them.
+  function customSwatch(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    const r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    const s = max ? d / max : 0;
+    if (s < 0.15) return [hex, hex];
+    let h = 0;
+    if (d) h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    h = (h / 6 + 1) % 1;
+    return [-0.05, 0, 0.05].map((shift) => {
+      const hh = ((h + shift) % 1 + 1) % 1, i = Math.floor(hh * 6), f = hh * 6 - i;
+      const p = 1 - s, q = 1 - f * s, t = 1 - (1 - f) * s;
+      const [rr, gg, bb] = [[1, t, p], [q, 1, p], [p, 1, t], [p, q, 1], [t, p, 1], [1, p, q]][i % 6];
+      return "#" + [rr, gg, bb].map((v) => Math.round(v * 255).toString(16).padStart(2, "0")).join("");
+    });
+  }
 
   // ------------------------------------------------------------ drawing
 
@@ -322,11 +386,13 @@
     ui.palettes = palettes;
     for (const button of $("palettes").children) {
       const item = palettes.find((p) => p.id === button.dataset.value);
-      if (item) button.querySelector(".swatch").style.background = `linear-gradient(90deg, ${item.colors.join(", ")})`;
+      const colors = button.dataset.value === "custom" && ui.pending ? customSwatch(ui.pending.color) : item && item.colors;
+      if (colors) button.querySelector(".swatch").style.background = `linear-gradient(90deg, ${colors.join(", ")})`;
     }
   }
   function formatValue(key, value) {
     if (key === "brightness") return `${value}%`;
+    if (key === "night_light") return value > 0 ? `${value}%` : "Off";
     if (key === "sensitivity") return `${value > 0 ? "+" : ""}${value} dB`;
     return `${value} ms`;
   }
@@ -346,10 +412,24 @@
         button.title = button.dataset.value === a[key] ? "On the LEDs now" : "";
       }
     }
-    for (const key of ["brightness", "sensitivity", "latency_ms"]) {
+    for (const key of SLIDERS) {
       $(key).value = p[key];
       $(`${key}-out`).value = formatValue(key, p[key]);
     }
+    $("color").value = p.color;
+    for (const button of $("color-presets").children) {
+      button.setAttribute("aria-pressed", String(button.dataset.value === p.color));
+    }
+    updatePalettes(ui.palettes);
+    const effect = ui.effects.find((e) => e.id === p.effect);
+    $("effect-desc").textContent = effect ? effect.description : "";
+    $("palette-note").textContent = p.effect === "manual" ? "Manual shows the custom colour; these colours are not used." : "";
+    for (const button of $("modes").children) {
+      button.setAttribute("aria-pressed", String(button.dataset.mode === ui.mode));
+    }
+    $("preview-note").textContent = ui.mode === "idle"
+      ? (p.night_light > 0 ? `Night light at ${p.night_light}%, while no music plays` : "Night light off: HyperHDR shows its own picture")
+      : ui.playing ? "Following the music" : "Playing a test beat";
     const changed = KEYS.filter((k) => p[k] !== a[k]);
     $("apply").disabled = !changed.length || !ui.connected;
     $("reset").disabled = !changed.length;
@@ -364,7 +444,6 @@
     } else {
       status.textContent = "The preview matches your LEDs. Pick something to try it out.";
     }
-    $("preview-note").textContent = ui.playing ? "Following the music" : "Playing a test beat";
     $("live-note").textContent = ui.playing ? "Live" : "Idle";
     if (ui.playing) $("live-overlay").hidden = true;
     const pill = $("status");
@@ -384,7 +463,7 @@
   let socket = null, retry = 500;
   function sendPreview() {
     if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "preview", settings: ui.pending }));
+      socket.send(JSON.stringify({ type: "preview", settings: ui.pending, mode: ui.mode }));
     }
   }
   function connect() {
@@ -462,11 +541,32 @@
     ui.pending = { ...state.settings };
     ui.playing = state.playing;
     ui.saves = state.saves;
+    ui.effects = state.effects;
+    ui.palettes = state.palettes;
     $("count").textContent = `${state.leds.x.length} LEDs`;
-    chipGroup($("effects"), state.effects, "effect", (b, item) => { b.textContent = item.label; });
+    chipGroup($("effects"), state.effects, "effect", (b, item) => { b.textContent = item.label; b.title = item.description; });
     chipGroup($("palettes"), state.palettes, "palette", renderPalette);
     chipGroup($("responses"), state.responses, "response", (b, item) => { b.textContent = item.label; });
-    for (const key of ["brightness", "sensitivity", "latency_ms"]) setupSlider(key, state.ranges[key]);
+    for (const key of SLIDERS) setupSlider(key, state.ranges[key]);
+    $("color").addEventListener("input", () => setPending("color", $("color").value.toLowerCase()));
+    for (const [hex, name] of PRESETS) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "preset";
+      button.dataset.value = hex;
+      button.title = name;
+      button.setAttribute("aria-label", name);
+      button.style.background = hex;
+      button.addEventListener("click", () => setPending("color", hex));
+      $("color-presets").append(button);
+    }
+    for (const button of $("modes").children) {
+      button.addEventListener("click", () => {
+        ui.mode = button.dataset.mode;
+        sendPreview();
+        render();
+      });
+    }
     $("apply").addEventListener("click", apply);
     $("reset").addEventListener("click", () => {
       ui.pending = { ...ui.applied };

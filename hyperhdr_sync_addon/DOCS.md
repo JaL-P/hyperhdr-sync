@@ -26,6 +26,11 @@ the add-on's configuration.
   runs as an add-on here. Otherwise use `ws://MUSIC-ASSISTANT-IP:8927/sendspin`.
 - **API token**: only needed when HyperHDR is on a different subnet. Create one in HyperHDR under
   **Token Management**.
+- **Night light**: brightness of the custom colour while no music plays. At 0 (the default) the
+  LEDs go back to HyperHDR's screen grabber when the music stops; above 0 they keep glowing in
+  the custom colour, so the TV picture is not shown on them until you turn it off.
+- **Custom colour**: `#rrggbb`, for the Manual effect, the Custom colour palette and the night
+  light.
 - **Effect**, **Colours**, **Brightness**, **Sensitivity**, **Response**, **Latency**: how the
   lights look. The web UI changes them without a restart; after changing them here, restart the
   add-on.
