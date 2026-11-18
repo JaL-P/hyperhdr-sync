@@ -106,7 +106,7 @@ async def test_music_preview_stays_in_step_with_the_leds() -> None:
 
     live = EngineSettings(effect=Effect.PARTY, palette=Palette.NEON)
     music = bridge.Bridge(Engine(LedLayout.strip(30), live), Sender(), 0)
-    music.client = Clock()  # type: ignore[assignment]
+    music.client = Clock()
     music.streaming = True
     music.set_preview(live)
 
