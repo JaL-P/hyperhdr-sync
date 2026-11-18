@@ -30,6 +30,7 @@ import aiohttp
 from aiohttp import web
 
 from hyperhdr_sync.engine import (
+    AlbumMode,
     Effect,
     EngineSettings,
     Palette,
@@ -88,6 +89,14 @@ PALETTE_LABELS = {
     Palette.CANDY: "Candy",
     Palette.PASTEL: "Pastel",
 }
+ALBUM_MODE_LABELS = {
+    AlbumMode.VIBRANT: ("Vibrant", "Every cover colour, boosted to full brightness"),
+    AlbumMode.DOMINANT: ("Dominant", "Only the main colour of the cover, with nearby shades"),
+    AlbumMode.ACCENT: ("Accent", "The cover's accent colour first, then its main colour"),
+    AlbumMode.NATURAL: ("Natural", "The colours as they look on the cover, greys included"),
+    AlbumMode.PASTEL: ("Pastel", "The cover colours softened towards white"),
+    AlbumMode.CONTRAST: ("Contrast", "The main colour against its opposite"),
+}
 RESPONSE_LABELS = {
     Response.SNAPPY: "Snappy",
     Response.BALANCED: "Balanced",
@@ -126,6 +135,7 @@ def settings_to_dict(settings: UiSettings) -> dict[str, Any]:
         "latency_ms": int(settings.latency_ms),
         "color": hex_color(engine.color),
         "night_light": round(settings.night_light * 100),
+        "album_mode": engine.album_mode.value,
     }
 
 
@@ -147,6 +157,7 @@ def parse_settings(data: Any) -> UiSettings:
         latency_ms = int(data["latency_ms"])
         color = parse_hex_color(str(data["color"]))
         night_light = int(data["night_light"])
+        album_mode = AlbumMode(str(data["album_mode"]))
     except (KeyError, TypeError) as err:
         raise ValueError(f"missing or invalid setting: {err}") from err
     for name, value, (low, high) in (
@@ -164,6 +175,7 @@ def parse_settings(data: Any) -> UiSettings:
         sensitivity_db=sensitivity,
         response=response,
         color=color,
+        album_mode=album_mode,
     )
     return UiSettings(engine, latency_ms, night_light / 100.0)
 
@@ -196,6 +208,8 @@ class WebUi:
         self._ticker: asyncio.Task[None] | None = None
         self._swatch_key: tuple[object, ...] | None = None
         self._swatches: list[dict[str, Any]] = []
+        self._album_key: tuple[tuple[int, int, int], ...] | None = None
+        self._album_swatches: list[dict[str, Any]] = []
         # What the preview shows: "music" (the music, or the test beat while nothing
         # plays) or "idle" (what the LEDs do once the music stops: the night light).
         self._preview_mode = "music"
@@ -257,6 +271,7 @@ class WebUi:
                     for e, (label, description) in EFFECT_LABELS.items()
                 ],
                 "palettes": self._palettes(),
+                "album_modes": self._album_modes(),
                 "responses": [
                     {"id": r.value, "label": label} for r, label in RESPONSE_LABELS.items()
                 ],
@@ -371,6 +386,7 @@ class WebUi:
             frame = self._bridge.last_rgb + preview_rgb
             current = {"type": "status", "playing": self._bridge.streaming}
             current["palettes"] = self._palettes()
+            current["album_modes"] = self._album_modes()
             for ws in list(self._clients):
                 with contextlib.suppress(ConnectionResetError, RuntimeError):
                     if current != status:
@@ -386,17 +402,42 @@ class WebUi:
             UiSettings(bridge.engine.settings, bridge.latency_ms, bridge.night_light)
         )
 
+    def _album_modes(self) -> list[dict[str, Any]]:
+        """Return the artwork modes with the colours each takes from the current cover."""
+        album = self._bridge.engine.album_colors
+        if album != self._album_key:
+            self._album_key = album
+            self._album_swatches = [
+                {
+                    "id": mode.value,
+                    "label": label,
+                    "description": description,
+                    "colors": [
+                        hex_color(c) for c in palette_swatch(Palette.ALBUM, album, album_mode=mode)
+                    ],
+                }
+                for mode, (label, description) in ALBUM_MODE_LABELS.items()
+            ]
+        return self._album_swatches
+
     def _palettes(self) -> list[dict[str, Any]]:
         """Return the palettes with sample colours; the album one follows the artwork."""
         album = self._bridge.engine.album_colors
-        color = self._bridge.engine.settings.color
-        if (album, color) != self._swatch_key:
-            self._swatch_key = (album, color)
+        engine_settings = self._bridge.engine.settings
+        color = engine_settings.color
+        key = (album, color, engine_settings.album_mode)
+        if key != self._swatch_key:
+            self._swatch_key = key
             self._swatches = [
                 {
                     "id": palette.value,
                     "label": label,
-                    "colors": [hex_color(c) for c in palette_swatch(palette, album, color=color)],
+                    "colors": [
+                        hex_color(c)
+                        for c in palette_swatch(
+                            palette, album, color=color, album_mode=engine_settings.album_mode
+                        )
+                    ],
                 }
                 for palette, label in PALETTE_LABELS.items()
             ]

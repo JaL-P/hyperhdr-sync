@@ -29,6 +29,9 @@ the add-on's configuration.
 - **Night light**: brightness of the custom colour while no music plays. At 0 (the default) the
   LEDs go back to HyperHDR's screen grabber when the music stops; above 0 they keep glowing in
   the custom colour, so the TV picture is not shown on them until you turn it off.
+- **Artwork colours**: how the Album art colours are picked from the cover: Vibrant (every
+  cover colour, boosted), Dominant (the main colour), Accent, Natural (as on the cover),
+  Pastel or Contrast (the main colour and its opposite).
 - **Custom colour**: `#rrggbb`, for the Manual effect, the Custom colour palette and the night
   light.
 - **Effect**, **Colours**, **Brightness**, **Sensitivity**, **Response**, **Latency**: how the

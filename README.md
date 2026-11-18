@@ -67,6 +67,7 @@ Useful options (`--help` lists all):
 | `--demo` | Play a built-in test beat on the LEDs, without Music Assistant |
 | `--effect` | `lumina`, `colora`, `spectrum`, `retro`, `scanner`, `rhythm`, `party`, `vu`, `pulse`, `ripple`, `scroll`, `energy`, `ambient`, `manual` |
 | `--palette` | `album` (cover colours), `custom` (shades of `--color`), `rainbow`, `classic`, `sunset`, `ocean`, `aurora`, `ice`, `fire`, `lava`, `warm`, `forest`, `neon`, `candy`, `pastel` |
+| `--album-mode` | How `album` picks colours from the cover: `vibrant`, `dominant`, `accent`, `natural`, `pastel`, `contrast` |
 | `--color` | Custom colour `#rrggbb` for `manual`, `custom` and the night light (default warm white) |
 | `--night-light` | 0-100: glow in the custom colour while no music plays, instead of handing the LEDs back to HyperHDR |
 | `--brightness` | Percent, on top of HyperHDR's own brightness |

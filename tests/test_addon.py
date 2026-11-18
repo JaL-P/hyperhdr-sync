@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from hyperhdr_sync.engine import Effect, Palette, Response
+from hyperhdr_sync.engine import AlbumMode, Effect, Palette, Response
 
 yaml = pytest.importorskip("yaml")
 
@@ -62,6 +62,7 @@ def test_choices_match_engine() -> None:
     assert _choices(schema["effect"]) == {effect.value for effect in Effect}
     assert _choices(schema["palette"]) == {palette.value for palette in Palette}
     assert _choices(schema["response"]) == {response.value for response in Response}
+    assert _choices(schema["album_mode"]) == {mode.value for mode in AlbumMode}
 
 
 def test_translations_cover_schema() -> None:

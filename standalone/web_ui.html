@@ -199,6 +199,11 @@
       <div class="hint" id="palette-note"></div></div>
     </div>
     <div class="group">
+      <div class="label">Artwork colours<small>How Album art picks colours from the cover</small></div>
+      <div><div class="chips" id="album-modes" role="group" aria-label="Artwork colours"></div>
+      <div class="hint" id="album-mode-desc"></div></div>
+    </div>
+    <div class="group">
       <div class="label">Custom colour<small>For Manual, Custom colour and the night light</small></div>
       <div class="color-row">
         <input type="color" id="color" aria-label="Custom colour">
@@ -243,7 +248,7 @@
 <script>
 "use strict";
 (() => {
-  const KEYS = ["effect", "palette", "brightness", "sensitivity", "response", "latency_ms", "color", "night_light"];
+  const KEYS = ["effect", "palette", "brightness", "sensitivity", "response", "latency_ms", "color", "night_light", "album_mode"];
   const SLIDERS = ["brightness", "sensitivity", "latency_ms", "night_light"];
   const PRESETS = [
     ["#ff9329", "Warm white"], ["#fff4e5", "Soft white"], ["#ffffff", "Cool white"],
@@ -254,6 +259,7 @@
   const ui = {
     leds: null, applied: null, pending: null, palettes: [], effects: [], playing: false,
     saves: false, live: null, preview: null, connected: false, message: null, mode: "music",
+    albumModes: [],
   };
 
   // Shades of the custom colour, as the Custom colour palette builds them.
@@ -390,6 +396,13 @@
       if (colors) button.querySelector(".swatch").style.background = `linear-gradient(90deg, ${colors.join(", ")})`;
     }
   }
+  function updateAlbumModes(modes) {
+    ui.albumModes = modes;
+    for (const button of $("album-modes").children) {
+      const item = modes.find((m) => m.id === button.dataset.value);
+      if (item) button.querySelector(".swatch").style.background = `linear-gradient(90deg, ${item.colors.join(", ")})`;
+    }
+  }
   function formatValue(key, value) {
     if (key === "brightness") return `${value}%`;
     if (key === "night_light") return value > 0 ? `${value}%` : "Off";
@@ -405,7 +418,7 @@
 
   function render() {
     const p = ui.pending, a = ui.applied;
-    for (const [id, key] of [["effects", "effect"], ["palettes", "palette"], ["responses", "response"]]) {
+    for (const [id, key] of [["effects", "effect"], ["palettes", "palette"], ["album-modes", "album_mode"], ["responses", "response"]]) {
       for (const button of $(id).children) {
         button.setAttribute("aria-pressed", String(button.dataset.value === p[key]));
         button.classList.toggle("applied", button.dataset.value === a[key]);
@@ -421,6 +434,10 @@
       button.setAttribute("aria-pressed", String(button.dataset.value === p.color));
     }
     updatePalettes(ui.palettes);
+    updateAlbumModes(ui.albumModes);
+    const albumMode = ui.albumModes.find((m) => m.id === p.album_mode);
+    $("album-mode-desc").textContent = (albumMode ? albumMode.description : "")
+      + (p.palette !== "album" ? " (used when the colours are set to Album art)" : "");
     const effect = ui.effects.find((e) => e.id === p.effect);
     $("effect-desc").textContent = effect ? effect.description : "";
     $("palette-note").textContent = p.effect === "manual" ? "Manual shows the custom colour; these colours are not used." : "";
@@ -483,6 +500,7 @@
         if (data.type === "status") {
           ui.playing = data.playing;
           if (data.palettes) updatePalettes(data.palettes);
+          if (data.album_modes) ui.albumModes = data.album_modes;
           render();
         } else if (data.type === "error") {
           ui.message = { kind: "err", text: data.message };
@@ -543,9 +561,11 @@
     ui.saves = state.saves;
     ui.effects = state.effects;
     ui.palettes = state.palettes;
+    ui.albumModes = state.album_modes;
     $("count").textContent = `${state.leds.x.length} LEDs`;
     chipGroup($("effects"), state.effects, "effect", (b, item) => { b.textContent = item.label; b.title = item.description; });
     chipGroup($("palettes"), state.palettes, "palette", renderPalette);
+    chipGroup($("album-modes"), state.album_modes, "album_mode", (b, item) => { renderPalette(b, item); b.title = item.description; });
     chipGroup($("responses"), state.responses, "response", (b, item) => { b.textContent = item.label; });
     for (const key of SLIDERS) setupSlider(key, state.ranges[key]);
     $("color").addEventListener("input", () => setPending("color", $("color").value.toLowerCase()));

@@ -8,6 +8,10 @@
 - New effects: Lumina (adaptive brightness), Colora (adaptive colour), Retro, Scanner, Rhythm,
   Party and Manual (a fixed custom colour).
 - New colours: Aurora, Pastel, Ice, Candy, Lava, Warm, Classic and Custom colour.
+- Artwork colours: choose how Album art picks colours from the cover (Vibrant, Dominant,
+  Accent, Natural, Pastel or Contrast).
+- Colour gradients blend around the colour wheel, so they stay vivid instead of turning grey
+  between opposite colours.
 - Night light: glow in the custom colour while no music plays, instead of handing the LEDs back
   to HyperHDR. The web UI previews it with "When idle".
 

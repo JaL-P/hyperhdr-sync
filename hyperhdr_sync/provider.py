@@ -12,6 +12,7 @@ from music_assistant.models.plugin import PluginProvider
 
 from .bridge import HyperHdrBridge
 from .constants import (
+    CONF_ALBUM_MODE,
     CONF_BRIGHTNESS,
     CONF_COLOR,
     CONF_EFFECT,
@@ -29,7 +30,7 @@ from .constants import (
     DEFAULT_SENSITIVITY_DB,
     LAYOUT_REFRESH_INTERVAL_S,
 )
-from .engine import Effect, Palette, Response
+from .engine import AlbumMode, Effect, Palette, Response
 from .hyperhdr import (
     DEFAULT_UDP_PORT,
     DEFAULT_WEB_PORT,
@@ -40,6 +41,7 @@ from .hyperhdr import (
 )
 from .layout import LedLayout
 from .settings import (
+    DEFAULT_ALBUM_MODE,
     DEFAULT_COLOR_HEX,
     DEFAULT_EFFECT,
     DEFAULT_PALETTE,
@@ -53,6 +55,7 @@ if TYPE_CHECKING:
     from music_assistant.providers.sendspin.provider import SendspinProvider
 
 _SETTINGS_KEYS = (
+    CONF_ALBUM_MODE,
     CONF_COLOR,
     CONF_EFFECT,
     CONF_PALETTE,
@@ -119,6 +122,14 @@ class HyperHdrProvider(PluginProvider):
                 type=ConfigEntryType.INTEGER,
                 default_value=DEFAULT_LATENCY_MS,
                 range=(0, 2000),
+                immediate_apply=True,
+                category="settings",
+            ),
+            ConfigEntry(
+                key=CONF_ALBUM_MODE,
+                type=ConfigEntryType.STRING,
+                default_value=DEFAULT_ALBUM_MODE.value,
+                options=[ConfigValueOption(mode.value) for mode in AlbumMode],
                 immediate_apply=True,
                 category="settings",
             ),

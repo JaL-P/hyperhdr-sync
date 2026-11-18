@@ -14,7 +14,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from hyperhdr_sync.engine import Effect, Engine, EngineSettings, Palette, Response
+from hyperhdr_sync.engine import AlbumMode, Effect, Engine, EngineSettings, Palette, Response
 from hyperhdr_sync.layout import LedLayout
 
 _STANDALONE = Path(__file__).resolve().parents[1] / "standalone"
@@ -43,6 +43,7 @@ GOOD = {
     "latency_ms": 200,
     "color": "#ff3b1f",
     "night_light": 30,
+    "album_mode": "accent",
 }
 
 
@@ -79,6 +80,7 @@ def test_parse_settings_checks_values() -> None:
         sensitivity_db=3.0,
         response=Response.SMOOTH,
         color=(255, 59, 31),
+        album_mode=AlbumMode.ACCENT,
     )
     assert settings.latency_ms == 200
     assert settings.night_light == 0.3
@@ -90,6 +92,7 @@ def test_parse_settings_checks_values() -> None:
         {**GOOD, "latency_ms": "soon"},
         {**GOOD, "color": "red"},
         {**GOOD, "night_light": 101},
+        {**GOOD, "album_mode": "sepia"},
         {k: v for k, v in GOOD.items() if k != "palette"},
         ["not", "an", "object"],
     ):
@@ -111,6 +114,7 @@ async def test_page_state_and_apply() -> None:
         assert state["settings"]["effect"] == "spectrum"
         assert state["saves"] is False
         assert {p["id"] for p in state["palettes"]} == {p.value for p in Palette}
+        assert {m["id"] for m in state["album_modes"]} == {m.value for m in AlbumMode}
         assert all(len(p["colors"]) >= 2 for p in state["palettes"])
 
         bad = await client.post("/api/apply", json={**GOOD, "brightness": 500})

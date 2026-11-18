@@ -78,6 +78,18 @@
       "label": "Light timing (ms)",
       "description": "Makes the lights react slightly earlier so they stay in step with your speaker. Increase if the lights lag the music."
     },
+    "album_mode": {
+      "label": "Artwork colours",
+      "description": "How the Album artwork colours are picked from the cover.",
+      "options": {
+        "vibrant": "Vibrant: every cover colour, boosted",
+        "dominant": "Dominant: only the main colour",
+        "accent": "Accent: the accent colour first",
+        "natural": "Natural: as they look on the cover",
+        "pastel": "Pastel: softened",
+        "contrast": "Contrast: the main colour and its opposite"
+      }
+    },
     "color": {
       "label": "Custom colour",
       "description": "Colour as #rrggbb, used by the Manual effect and the custom colours palette. Default warm white #ff9329."

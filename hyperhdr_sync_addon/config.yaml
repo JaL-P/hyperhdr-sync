@@ -29,6 +29,7 @@ options:
   response: "balanced"
   latency_ms: 120
   color: "#ff9329"
+  album_mode: "vibrant"
   night_light: 0
   udp_port: 5568
   web_port: 8090
@@ -45,6 +46,7 @@ schema:
   response: "list(snappy|balanced|smooth)"
   latency_ms: "int(0,2000)"
   color: "match(^#[0-9a-fA-F]{6}$)"
+  album_mode: "list(vibrant|dominant|accent|natural|pastel|contrast)"
   night_light: "int(0,100)"
   udp_port: "port"
   web_port: "port"

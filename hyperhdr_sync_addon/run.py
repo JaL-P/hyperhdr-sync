@@ -27,6 +27,7 @@ _FLAGS = {
     "response": "--response",
     "latency_ms": "--latency-ms",
     "color": "--color",
+    "album_mode": "--album-mode",
     "night_light": "--night-light",
 }
 

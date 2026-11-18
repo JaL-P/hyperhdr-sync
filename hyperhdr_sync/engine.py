@@ -94,6 +94,23 @@ class Effect(StrEnum):
     """One fixed colour on every LED; does not follow the music."""
 
 
+class AlbumMode(StrEnum):
+    """How the Album art palette is made from the colours Music Assistant takes from the cover."""
+
+    VIBRANT = "vibrant"
+    """All cover colours, each boosted to full brightness and saturation."""
+    DOMINANT = "dominant"
+    """Only the cover's main colour, with neighbouring shades."""
+    ACCENT = "accent"
+    """The cover's accent colour first, then its main colour."""
+    NATURAL = "natural"
+    """The colours as they look on the cover, greys included; only dark ones are lifted."""
+    PASTEL = "pastel"
+    """The cover colours softened towards white."""
+    CONTRAST = "contrast"
+    """The main colour against its opposite on the colour wheel."""
+
+
 class Palette(StrEnum):
     """Available colour palettes."""
 
@@ -170,6 +187,8 @@ class EngineSettings:
     response: Response = Response.BALANCED
     color: tuple[int, int, int] = DEFAULT_COLOR
     """Custom colour (RGB 0-255), for the Manual effect, the Custom palette and the night light."""
+    album_mode: AlbumMode = AlbumMode.VIBRANT
+    """How the Album art palette picks colours from the cover."""
 
 
 def parse_hex_color(value: str) -> tuple[int, int, int]:
@@ -239,8 +258,13 @@ class Engine:
 
         :param settings: The new settings.
         """
-        palette_changed = settings.palette != self.settings.palette or (
-            settings.palette == Palette.CUSTOM and settings.color != self.settings.color
+        palette_changed = (
+            settings.palette != self.settings.palette
+            or (settings.palette == Palette.CUSTOM and settings.color != self.settings.color)
+            or (
+                settings.palette == Palette.ALBUM
+                and settings.album_mode != self.settings.album_mode
+            )
         )
         self.settings = settings
         if palette_changed:
@@ -639,7 +663,10 @@ class Engine:
     def _rebuild_palette(self) -> None:
         """Rebuild both colour lookup tables for the selected palette."""
         self._lut_linear, self._lut_cyclic = _palette_luts(
-            self.settings.palette, self._album_colors, self.settings.color
+            self.settings.palette,
+            self._album_colors,
+            self.settings.color,
+            self.settings.album_mode,
         )
 
 
@@ -648,6 +675,7 @@ def palette_swatch(
     album_colors: Iterable[Sequence[int]] = (),
     count: int = 8,
     color: tuple[int, int, int] = DEFAULT_COLOR,
+    album_mode: AlbumMode = AlbumMode.VIBRANT,
 ) -> list[tuple[int, int, int]]:
     """
     Return colours spread across a palette's gradient, e.g. to show it in a user interface.
@@ -656,9 +684,10 @@ def palette_swatch(
     :param album_colors: Artwork colours, used by :attr:`Palette.ALBUM`.
     :param count: How many colours to return.
     :param color: The custom colour, used by :attr:`Palette.CUSTOM`.
+    :param album_mode: How :attr:`Palette.ALBUM` picks colours from the cover.
     """
     cleaned = tuple((int(c[0]), int(c[1]), int(c[2])) for c in album_colors if len(c) >= 3)
-    linear, _ = _palette_luts(palette, cleaned, color)
+    linear, _ = _palette_luts(palette, cleaned, color, album_mode)
     at = np.linspace(0.0, 1.0, max(count, 2))
     return [
         (int(r * 255 + 0.5), int(g * 255 + 0.5), int(b * 255 + 0.5))
@@ -670,7 +699,10 @@ def palette_swatch(
 
 
 def _palette_luts(
-    palette: Palette, album_colors: tuple[_RGB, ...], color: _RGB = DEFAULT_COLOR
+    palette: Palette,
+    album_colors: tuple[_RGB, ...],
+    color: _RGB = DEFAULT_COLOR,
+    album_mode: AlbumMode = AlbumMode.VIBRANT,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return the (linear, cyclic) colour lookup tables of a palette."""
     stops: tuple[_RGB, ...] | None = None
@@ -679,12 +711,17 @@ def _palette_luts(
     elif palette == Palette.ALBUM:
         # Black-and-white artwork has no colour to show: light it in shades of white
         # rather than the rainbow, whose bass end would turn the LEDs red.
-        stops = _vivid_stops(album_colors) or (_MONOCHROME_STOPS if album_colors else None)
+        stops = _album_stops(album_colors, album_mode)
     elif palette in _PALETTE_STOPS:
         stops = _PALETTE_STOPS[palette]
     if stops:
         colors = np.array(stops, np.float32) / 255.0
-        return _gradient(colors, cyclic=False), _gradient(colors, cyclic=True)
+        # Natural artwork colours blend directly, so no hues appear that are not on the cover.
+        wheel = not (palette == Palette.ALBUM and album_mode == AlbumMode.NATURAL)
+        return (
+            _gradient(colors, cyclic=False, wheel=wheel),
+            _gradient(colors, cyclic=True, wheel=wheel),
+        )
     # Rainbow (also the fallback when the artwork has no usable colours). The
     # linear table stops at violet so both ends of a bar are not the same red.
     hues = np.arange(_LUT_SIZE) / _LUT_SIZE
@@ -729,17 +766,43 @@ def _a_weight_compensation_db() -> np.ndarray:
     return boost
 
 
-def _gradient(colors: np.ndarray, *, cyclic: bool) -> np.ndarray:
-    """Build a lookup table blending through ``colors`` (optionally back to the first)."""
+def _gradient(colors: np.ndarray, *, cyclic: bool, wheel: bool = True) -> np.ndarray:
+    """
+    Build a lookup table blending through ``colors`` (optionally back to the first).
+
+    Colours blend around the colour wheel (hue, saturation and brightness), not channel
+    by channel: mixing e.g. red and teal channel-wise passes through a dull grey, while
+    going round the wheel stays vivid. Whites and greys take the hue of their neighbour.
+    With ``wheel=False`` the colours blend channel by channel.
+    """
     stops = np.vstack([colors, colors[:1]]) if cyclic else colors
     if len(stops) == 1:
         return np.repeat(stops, _LUT_SIZE, axis=0).astype(np.float32)
+    if not wheel:
+        span = len(stops) - 1
+        at = np.arange(_LUT_SIZE) / (_LUT_SIZE if cyclic else _LUT_SIZE - 1) * span
+        low = np.minimum(at.astype(np.intp), span - 1)
+        mix = (at - low)[:, None]
+        direct: np.ndarray = (stops[low] * (1.0 - mix) + stops[low + 1] * mix).astype(np.float32)
+        return direct
+    hsv = np.array([colorsys.rgb_to_hsv(*map(float, c)) for c in stops])
+    coloured = np.flatnonzero(hsv[:, 1] >= 0.05)
+    for i in np.flatnonzero(hsv[:, 1] < 0.05):
+        if coloured.size:
+            hsv[i, 0] = hsv[coloured[np.argmin(np.abs(coloured - i))], 0]
     span = len(stops) - 1
     at = np.arange(_LUT_SIZE) / (_LUT_SIZE if cyclic else _LUT_SIZE - 1) * span
     low = np.minimum(at.astype(np.intp), span - 1)
-    frac = (at - low)[:, None]
-    table: np.ndarray = (stops[low] * (1.0 - frac) + stops[low + 1] * frac).astype(np.float32)
-    return table
+    frac = at - low
+    start, end = hsv[low], hsv[low + 1]
+    turn = (end[:, 0] - start[:, 0] + 0.5) % 1.0 - 0.5  # the shorter way round
+    hue = (start[:, 0] + turn * frac) % 1.0
+    sat = start[:, 1] + (end[:, 1] - start[:, 1]) * frac
+    val = start[:, 2] + (end[:, 2] - start[:, 2]) * frac
+    return np.array(
+        [colorsys.hsv_to_rgb(h, s, v) for h, s, v in zip(hue, sat, val, strict=True)],
+        np.float32,
+    )
 
 
 def _sample(lut: np.ndarray, at: np.ndarray) -> np.ndarray:
@@ -773,6 +836,65 @@ def _custom_stops(color: _RGB) -> tuple[_RGB, ...]:
         r, g, b = colorsys.hsv_to_rgb((hue + shift) % 1.0, sat, 1.0)
         shades.append((round(r * 255), round(g * 255), round(b * 255)))
     return tuple(shades)
+
+
+def _album_stops(colors: tuple[_RGB, ...], mode: AlbumMode) -> tuple[_RGB, ...] | None:
+    """
+    Make the Album art palette from the cover colours (main colour first, then the accent).
+
+    Black-and-white artwork has no colour to show, so it is lit in shades of white rather
+    than the rainbow, whose bass end would turn the LEDs red. Without any cover colours
+    there are no stops and the rainbow is used.
+    """
+    if not colors:
+        return None
+    stops: tuple[_RGB, ...] | None
+    if mode == AlbumMode.DOMINANT:
+        stops = _vivid_stops(colors[:1])
+    elif mode == AlbumMode.ACCENT:
+        stops = _vivid_stops(colors[1:2] + colors[:1])
+    elif mode == AlbumMode.NATURAL:
+        stops = _natural_stops(colors)
+    elif mode == AlbumMode.PASTEL:
+        vivid = _vivid_stops(colors)
+        stops = tuple(_mix(c, (255, 255, 255), 0.45) for c in vivid) if vivid else None
+    elif mode == AlbumMode.CONTRAST:
+        vivid = _vivid_stops(colors)
+        stops = (vivid[0], _opposite(vivid[0])) if vivid else None
+    else:
+        stops = _vivid_stops(colors)
+    return stops or _MONOCHROME_STOPS
+
+
+def _natural_stops(colors: tuple[_RGB, ...]) -> tuple[_RGB, ...] | None:
+    """Cover colours as they are, with dark ones lifted so the LEDs still glow."""
+    stops: list[_RGB] = []
+    for color in colors:
+        brightest = max(color)
+        if brightest < 20:
+            continue
+        scale = max(1.0, 140.0 / brightest)
+        lifted = (
+            min(255, round(color[0] * scale)),
+            min(255, round(color[1] * scale)),
+            min(255, round(color[2] * scale)),
+        )
+        if all(sum(abs(a - b) for a, b in zip(lifted, s, strict=True)) > 40 for s in stops):
+            stops.append(lifted)
+    return tuple(stops) or None
+
+
+def _mix(color: _RGB, other: _RGB, amount: float) -> _RGB:
+    """Blend ``amount`` (0..1) of ``other`` into ``color``."""
+    r, g, b = (round(c * (1.0 - amount) + o * amount) for c, o in zip(color, other, strict=True))
+    return r, g, b
+
+
+def _opposite(color: _RGB) -> _RGB:
+    """Return the colour on the other side of the colour wheel, at full brightness."""
+    hue, sat, _ = colorsys.rgb_to_hsv(color[0] / 255.0, color[1] / 255.0, color[2] / 255.0)
+    r, g, b = colorsys.hsv_to_rgb((hue + 0.5) % 1.0, max(sat, 0.6), 1.0)
+    return round(r * 255), round(g * 255), round(b * 255)
 
 
 def _vivid_stops(colors: tuple[_RGB, ...]) -> tuple[_RGB, ...] | None:

@@ -39,6 +39,7 @@ from hyperhdr_sync.engine import (
     SPECTRUM_F_MAX,
     SPECTRUM_F_MIN,
     SPECTRUM_SCALE,
+    AlbumMode,
     Effect,
     Engine,
     EngineSettings,
@@ -450,6 +451,7 @@ async def run(args: argparse.Namespace) -> None:
             sensitivity_db=args.sensitivity,
             response=Response(args.response),
             color=args.color,
+            album_mode=AlbumMode(args.album_mode),
         )
         bridge = Bridge(Engine(layout, settings), sender, args.latency_ms, args.night_light / 100.0)
         # Stop as cleanly on SIGTERM (a service or container stopping) as on Ctrl+C.
@@ -527,6 +529,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--latency-ms", type=int, default=120, help="render this far ahead of the music"
+    )
+    parser.add_argument(
+        "--album-mode",
+        default=AlbumMode.VIBRANT.value,
+        choices=[m.value for m in AlbumMode],
+        help="how the album palette picks colours from the cover",
     )
     parser.add_argument(
         "--color",

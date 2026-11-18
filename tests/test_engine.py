@@ -5,6 +5,7 @@ import pytest
 
 from hyperhdr_sync.engine import (
     SPECTRUM_BINS,
+    AlbumMode,
     Effect,
     Engine,
     EngineSettings,
@@ -270,3 +271,34 @@ def test_hex_colours_round_trip() -> None:
     for bad in ("#fff", "red", "#gg0000"):
         with pytest.raises(ValueError):  # noqa: PT011
             parse_hex_color(bad)
+
+
+def test_album_modes_pick_colours_differently() -> None:
+    """Each artwork mode makes a different palette from the same cover colours."""
+    cover = [(200, 30, 30), (20, 60, 200), (240, 230, 220), (30, 20, 20)]  # red, blue accent
+    swatches = {
+        mode: palette_swatch(Palette.ALBUM, cover, count=5, album_mode=mode) for mode in AlbumMode
+    }
+    assert len({tuple(s) for s in swatches.values()}) == len(AlbumMode), "all modes differ"
+    assert all(r > b for r, _, b in swatches[AlbumMode.DOMINANT]), "dominant stays red"
+    accent = swatches[AlbumMode.ACCENT][0]
+    assert accent[2] > accent[0], "accent starts with the blue accent"
+    assert min(min(c) for c in swatches[AlbumMode.PASTEL]) > 80, "pastel is soft"
+    contrast = swatches[AlbumMode.CONTRAST]
+    assert contrast[0][0] > contrast[0][2]
+    assert contrast[-1][2] > contrast[-1][0], "the opposite of red is blue-green"
+    natural = palette_swatch(Palette.ALBUM, [(90, 90, 90)], count=3, album_mode=AlbumMode.NATURAL)
+    assert all(r == g == b for r, g, b in natural), "natural keeps a grey cover grey"
+
+
+def test_changing_the_album_mode_rebuilds_the_palette() -> None:
+    """Switching the artwork mode while playing changes the colours straight away."""
+    engine = Engine(_tv_layout(), EngineSettings(effect=Effect.LUMINA, palette=Palette.ALBUM))
+    engine.set_album_colors([(200, 30, 30), (20, 60, 200)])
+    red = _settle(engine, [LOUD] * SPECTRUM_BINS, frames=60).astype(int).sum(axis=0)
+    engine.update_settings(
+        EngineSettings(effect=Effect.LUMINA, palette=Palette.ALBUM, album_mode=AlbumMode.ACCENT)
+    )
+    blue = _settle(engine, [LOUD] * SPECTRUM_BINS, frames=60).astype(int).sum(axis=0)
+    assert red[0] > red[2]
+    assert blue[2] > blue[0]

@@ -14,6 +14,9 @@ configuration:
   palette:
     name: "Colours"
     description: "album uses the colours of the cover art, classic is green-yellow-red, custom uses shades of the custom colour."
+  album_mode:
+    name: "Artwork colours"
+    description: "How the album colours are picked from the cover: vibrant (all colours, boosted), dominant (the main colour), accent, natural (as on the cover), pastel or contrast (main colour and its opposite)."
   color:
     name: "Custom colour"
     description: "#rrggbb. Used by the manual effect, the custom colours and the night light."

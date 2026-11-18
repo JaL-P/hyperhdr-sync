@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NamedTuple, cast
 
 from .constants import (
+    CONF_ALBUM_MODE,
     CONF_BRIGHTNESS,
     CONF_COLOR,
     CONF_EFFECT,
@@ -18,6 +19,7 @@ from .constants import (
 )
 from .engine import (
     DEFAULT_COLOR,
+    AlbumMode,
     Effect,
     EngineSettings,
     Palette,
@@ -34,6 +36,7 @@ if TYPE_CHECKING:
 DEFAULT_EFFECT = Effect.SPECTRUM
 DEFAULT_PALETTE = Palette.ALBUM
 DEFAULT_RESPONSE = Response.BALANCED
+DEFAULT_ALBUM_MODE = AlbumMode.VIBRANT
 DEFAULT_COLOR_HEX = hex_color(DEFAULT_COLOR)
 
 
@@ -61,6 +64,7 @@ def get_settings(config: ProviderConfig) -> HyperHdrSettings:
             ),
             response=_enum(Response, config.get_value(CONF_RESPONSE), DEFAULT_RESPONSE),
             color=_color(config.get_value(CONF_COLOR)),
+            album_mode=_enum(AlbumMode, config.get_value(CONF_ALBUM_MODE), DEFAULT_ALBUM_MODE),
         ),
         latency_ms=int(cast("int", config.get_value(CONF_LATENCY_MS, DEFAULT_LATENCY_MS))),
     )
