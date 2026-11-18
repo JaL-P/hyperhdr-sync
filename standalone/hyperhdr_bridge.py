@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import copy
 import logging
 import math
 import os
@@ -100,11 +101,16 @@ class Bridge:
         self.night_light = night_light
         self.client: SendspinClient | None = None
         self.streaming = False
-        # A second engine with settings that are being tried out in the web UI. It gets
-        # the same sound features as the real one, but its frames never reach the LEDs.
+        # Settings being tried out in the web UI while music plays. When they differ from
+        # the live ones, ``preview`` is a copy of the live engine (same gain, colours and
+        # beat state) with those settings; it is fed and rendered in the same steps as the
+        # live engine, but its frames never reach the LEDs.
+        self.preview_settings: EngineSettings | None = None
         self.preview: Engine | None = None
-        # The frame most recently sent to HyperHDR, shown as "now" in the web UI.
+        # The frame most recently sent to HyperHDR, shown as "now" in the web UI, and the
+        # preview frame rendered in the same step.
         self.last_rgb = engine.render_black()
+        self.last_preview_rgb = self.last_rgb
         self._frames: deque[VisualizerFrame] = deque()
         self._beats: list[VisualizerFrame] = []
         self._colors: dict[str, tuple[int, int, int] | None] = {}
@@ -126,6 +132,8 @@ class Bridge:
         self.engine.update_settings(settings)
         self.latency_us = latency_ms * 1000
         self.night_light = night_light
+        if self.preview_settings is not None:
+            self.set_preview(self.preview_settings)
         LOGGER.info(
             "Settings applied: %s, %s colours, brightness %d%%, sensitivity %+.0f dB, %s, "
             "%d ms, colour %s, night light %d%%",
@@ -139,16 +147,29 @@ class Bridge:
             round(night_light * 100),
         )
 
-    def start_preview(self) -> Engine:
-        """Create the preview engine (if needed) with the current settings."""
-        if self.preview is None:
-            self.preview = Engine(self.engine.layout, self.engine.settings)
-            self.preview.set_album_colors(self.engine.album_colors)
-        return self.preview
+    def set_preview(self, settings: EngineSettings) -> None:
+        """
+        Preview other settings against the music, starting from the live engine's state.
+
+        With the live settings the preview is the live frame itself. Otherwise the live
+        engine is copied (automatic gain, colour drift, beat pulse, even the random
+        sequence of Party) and given the new settings, so the two pictures differ only
+        by what was changed.
+
+        :param settings: The settings to preview.
+        """
+        if settings == self.engine.settings:
+            self.preview = None
+        elif self.preview is None or self.preview_settings != settings:
+            if self.preview is None:
+                self.preview = copy.deepcopy(self.engine)
+            self.preview.update_settings(settings)
+        self.preview_settings = settings
 
     def stop_preview(self) -> None:
-        """Drop the preview engine."""
+        """Stop previewing."""
         self.preview = None
+        self.preview_settings = None
 
     # ---------------------------------------------------- Sendspin callbacks
 
@@ -160,8 +181,7 @@ class Bridge:
             LOGGER.info("Music started, driving the LEDs")
             self._frames.clear()
             self.engine.reset()
-            if self.preview is not None:
-                self.preview.reset()
+            self._refork_preview()
         self.streaming = True
 
     def on_stream_end(self, roles: list[str] | None) -> None:
@@ -178,8 +198,7 @@ class Bridge:
             self._frames.clear()
             self._beats.clear()
             self.engine.reset()
-            if self.preview is not None:
-                self.preview.reset()
+            self._refork_preview()
 
     def on_frames(self, frames: list[VisualizerFrame]) -> None:
         """Queue feature frames until their playback time."""
@@ -215,8 +234,13 @@ class Bridge:
         self._frames.clear()
         self._beats.clear()
         self.engine.reset()
-        if self.preview is not None:
-            self.preview.reset()
+        self._refork_preview()
+
+    def _refork_preview(self) -> None:
+        """Start the preview afresh from the (just reset) live engine."""
+        if self.preview_settings is not None:
+            self.preview = None
+            self.set_preview(self.preview_settings)
 
     # ----------------------------------------------------------- render loop
 
@@ -236,6 +260,7 @@ class Bridge:
                 )
                 self._drain(playhead_us)
                 rgb = self.engine.render(dt)
+                self.last_preview_rgb = rgb if self.preview is None else self.preview.render(dt)
                 self._stats["peak"] = max(self._stats["peak"], *rgb)
                 self._send(rgb)
                 blackouts_left = 3

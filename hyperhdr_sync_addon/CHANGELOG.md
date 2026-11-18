@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- The preview now stays in step with the LEDs while music plays: with unchanged settings it
+  shows exactly what the LEDs show, and a change starts from the LEDs' current state (levels,
+  colours, even Party's random bursts), so only the change itself differs.
+
 ## 0.3.1
 
 - Fix the web UI panel never starting ("The app seems to not be ready"): the add-on did

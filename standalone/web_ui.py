@@ -32,6 +32,7 @@ from aiohttp import web
 from hyperhdr_sync.engine import (
     AlbumMode,
     Effect,
+    Engine,
     EngineSettings,
     Palette,
     Response,
@@ -214,6 +215,10 @@ class WebUi:
         # plays) or "idle" (what the LEDs do once the music stops: the night light).
         self._preview_mode = "music"
         self._preview_night_light = bridge.night_light
+        # While no music plays the preview runs on its own engine with the test beat (or
+        # shows the night light); during music it is rendered by the bridge in lockstep.
+        self._preview_settings = bridge.engine.settings
+        self._idle_engine: Engine | None = None
 
     def make_app(self) -> web.Application:
         """Return the aiohttp application."""
@@ -292,8 +297,7 @@ class WebUi:
         except (ValueError, json.JSONDecodeError) as err:
             return web.json_response({"error": str(err)}, status=400)
         self._bridge.apply(settings.engine, settings.latency_ms, settings.night_light)
-        if self._bridge.preview is not None:
-            self._bridge.preview.update_settings(settings.engine)
+        self._set_preview(settings.engine)
         self._preview_night_light = settings.night_light
         result: dict[str, Any] = {"settings": self._current(), "saved": False}
         if self._saver is not None:
@@ -310,7 +314,7 @@ class WebUi:
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
         self._clients.add(ws)
-        self._bridge.start_preview()
+        self._set_preview(self._preview_settings)
         if self._ticker is None or self._ticker.done():
             self._ticker = asyncio.create_task(self._tick())
         try:
@@ -325,6 +329,7 @@ class WebUi:
                     self._ticker.cancel()
                     self._ticker = None
                 self._bridge.stop_preview()
+                self._idle_engine = None
         return ws
 
     async def _on_message(self, ws: web.WebSocketResponse, text: str) -> None:
@@ -336,7 +341,7 @@ class WebUi:
         except (ValueError, json.JSONDecodeError) as err:
             await ws.send_json({"type": "error", "message": str(err)})
             return
-        self._bridge.start_preview().update_settings(settings.engine)
+        self._set_preview(settings.engine)
         self._preview_night_light = settings.night_light
         if data.get("mode") in ("music", "idle"):
             self._preview_mode = data["mode"]
@@ -363,26 +368,28 @@ class WebUi:
             await asyncio.sleep(period)
             now = time.perf_counter()
             dt, last = now - last, now
-            preview = self._bridge.preview
-            if preview is None:
-                continue
+            idle = self._idle()
+            idle.set_album_colors(self._bridge.engine.album_colors)
             if self._preview_mode == "idle":
                 # Without a night light the LEDs go back to HyperHDR: shown as dark.
                 preview_rgb = (
-                    preview.render_night_light(dt, self._preview_night_light)
+                    idle.render_night_light(dt, self._preview_night_light)
                     if self._preview_night_light > 0.0
-                    else preview.render_black()
+                    else idle.render_black()
                 )
+            elif self._bridge.streaming:
+                # Rendered by the bridge in the same step as the frame on the LEDs.
+                preview_rgb = self._bridge.last_preview_rgb
             else:
-                if not self._bridge.streaming:
-                    loudness, spectrum, beat = self._demo(now - start)
-                    preview.feed(
-                        loudness=loudness,
-                        spectrum=spectrum,
-                        onset=200 if beat != last_beat else None,
-                    )
-                    last_beat = beat
-                preview_rgb = preview.render(dt)
+                loudness, spectrum, beat = self._demo(now - start)
+                idle.feed(
+                    loudness=loudness,
+                    spectrum=spectrum,
+                    onset=200 if beat != last_beat else None,
+                )
+                last_beat = beat
+                preview_rgb = idle.render(dt)
+            # Read both at once, so the two pictures show the same moment.
             frame = self._bridge.last_rgb + preview_rgb
             current = {"type": "status", "playing": self._bridge.streaming}
             current["palettes"] = self._palettes()
@@ -395,6 +402,18 @@ class WebUi:
             status = current
 
     # --------------------------------------------------------------- helpers
+
+    def _set_preview(self, settings: EngineSettings) -> None:
+        self._preview_settings = settings
+        self._bridge.set_preview(settings)
+        if self._idle_engine is not None:
+            self._idle_engine.update_settings(settings)
+
+    def _idle(self) -> Engine:
+        """Return the engine that renders the preview while no music plays."""
+        if self._idle_engine is None:
+            self._idle_engine = Engine(self._bridge.engine.layout, self._preview_settings)
+        return self._idle_engine
 
     def _current(self) -> dict[str, Any]:
         bridge = self._bridge

@@ -3,7 +3,7 @@ FROM ghcr.io/home-assistant/base-python:3.14-alpine3.24-2026.11.0
 # The bridge and its rendering engine come from this repository's release tag of the same
 # version as the add-on: Supervisor passes config.yaml's version as BUILD_VERSION, so every
 # add-on version needs a tag v<version>. The default is for building by hand.
-ARG BUILD_VERSION=0.3.1
+ARG BUILD_VERSION=0.3.2
 
 WORKDIR /app
 RUN curl -fsSL "https://github.com/JaL-P/hyperhdr-sync/archive/refs/tags/v${BUILD_VERSION}.tar.gz" \
