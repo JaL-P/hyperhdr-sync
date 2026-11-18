@@ -131,6 +131,8 @@ class Palette(StrEnum):
     """Green, yellow, red: the colours of a classic level meter."""
     CUSTOM = "custom"
     """Shades of the custom colour."""
+    MINE = "mine"
+    """The user's own colours (:attr:`EngineSettings.colors`), blended or as blocks."""
 
 
 class Response(StrEnum):
@@ -170,6 +172,13 @@ DEFAULT_COLOR: tuple[int, int, int] = (255, 147, 41)
 
 # Frequency bands (blocks) of the Retro equaliser; the spectrum bins are grouped into them.
 _RETRO_BANDS: int = 8
+# First spectrum bin of each Retro band.
+_RETRO_BIN_STARTS: np.ndarray = (np.arange(_RETRO_BANDS) * SPECTRUM_BINS // _RETRO_BANDS).astype(
+    np.intp
+)
+# Fewest LEDs per Retro block that can show a growing bar with a gap and a peak dot;
+# smaller blocks show their band by brightness instead.
+_RETRO_MIN_BAR_LEDS: float = 4.0
 # Album palette for artwork without colour: warm white through white to cool white.
 _MONOCHROME_STOPS: tuple[_RGB, ...] = ((255, 170, 90), (255, 255, 255), (160, 195, 255))
 
@@ -189,6 +198,10 @@ class EngineSettings:
     """Custom colour (RGB 0-255), for the Manual effect, the Custom palette and the night light."""
     album_mode: AlbumMode = AlbumMode.VIBRANT
     """How the Album art palette picks colours from the cover."""
+    colors: tuple[tuple[int, int, int], ...] = ()
+    """The colours of :attr:`Palette.MINE` (RGB 0-255), in order."""
+    steps: bool = False
+    """Show :attr:`Palette.MINE` as separate blocks of colour instead of blending them."""
 
 
 def parse_hex_color(value: str) -> tuple[int, int, int]:
@@ -234,8 +247,9 @@ class Engine:
         self._rng = np.random.default_rng(7)
         retro_at = self._ring * _RETRO_BANDS
         self._retro_block = np.minimum(retro_at.astype(np.intp), _RETRO_BANDS - 1)
-        self._retro_within = (retro_at - self._retro_block).astype(np.float32)
-        self._retro_leds = max(count / _RETRO_BANDS, 1.0)
+        # 0 in the middle of a Retro block, 1 at its ends.
+        self._retro_offset = (np.abs(retro_at - self._retro_block - 0.5) * 2.0).astype(np.float32)
+        self._retro_leds = count / _RETRO_BANDS
         self._album_colors: tuple[_RGB, ...] = ()
         self._lut_linear = np.zeros((_LUT_SIZE, 3), np.float32)
         self._lut_cyclic = np.zeros((_LUT_SIZE, 3), np.float32)
@@ -257,6 +271,10 @@ class Engine:
             or (
                 settings.palette == Palette.ALBUM
                 and settings.album_mode != self.settings.album_mode
+            )
+            or (
+                settings.palette == Palette.MINE
+                and (settings.colors, settings.steps) != (self.settings.colors, self.settings.steps)
             )
         )
         self.settings = settings
@@ -489,8 +507,12 @@ class Engine:
 
     def _fx_spectrum(self) -> np.ndarray:
         """Bass at the bottom of both sides rising to treble at top-centre."""
-        value = self._bands[self._band_lo] * (1.0 - self._band_frac)
-        value += self._bands[self._band_hi] * self._band_frac
+        if self._has_spectrum:
+            value = self._bands[self._band_lo] * (1.0 - self._band_frac)
+            value += self._bands[self._band_hi] * self._band_frac
+        else:
+            # Loudness-only stream: the whole spectrum follows the overall level.
+            value = np.full(self.layout.count, self._level, np.float32)
         value = value**_CONTRAST * (0.85 + 0.15 * self._pulse)
         frame: np.ndarray = _sample(self._lut_linear, self._pos) * value[:, None]
         return frame
@@ -558,7 +580,11 @@ class Engine:
         return frame
 
     def _fx_ambient(self, dt: float) -> np.ndarray:
-        """Calm colours turning around the screen; the music sets their speed, not brightness."""
+        """
+        Calm colours turning around the screen; the music sets their speed, not brightness.
+
+        :param dt: Seconds since the previous frame.
+        """
         self._ambient_phase = (self._ambient_phase + dt * (0.01 + 0.15 * self._level_slow)) % 1.0
         frame: np.ndarray = _sample_wrap(self._lut_cyclic, self._ring * 0.5 + self._ambient_phase)
         return frame * 0.55
@@ -580,6 +606,9 @@ class Engine:
             centroid = float((weights * np.linspace(0.0, 1.0, SPECTRUM_BINS)).sum()) / total
             target = min(1.0, max(0.0, (centroid - 0.12) / 0.55))
             self._colora += (target - self._colora) * _alpha(dt, 0.25)
+        elif not self._has_spectrum:
+            # Loudness-only stream: no pitch to follow, so the colour follows the loudness.
+            self._colora += (self._level - self._colora) * _alpha(dt, 0.25)
         at = np.clip(self._colora + (self._ring - 0.5) * 0.12, 0.0, 1.0)
         # Steady brightness: only the colour moves (brightness is what Lumina follows).
         frame: np.ndarray = _sample(self._lut_linear, at) * 0.85
@@ -590,23 +619,37 @@ class Engine:
         Graphic equaliser: eight frequency bands, each a block that lights from its middle.
 
         The blocks run around the screen from bass to treble; each has a peak dot that
-        falls back slowly, and dark gaps keep the blocks apart.
+        falls back slowly, and dark gaps keep the blocks apart. Blocks too short for a bar
+        show their band by brightness instead.
+
+        :param dt: Seconds since the previous frame.
         """
-        levels = self._bands.reshape(_RETRO_BANDS, -1).max(axis=1)
+        if self._has_spectrum:
+            levels = np.maximum.reduceat(self._bands, _RETRO_BIN_STARTS)
+        else:
+            # Loudness-only stream: every block shows the overall level.
+            levels = np.full(_RETRO_BANDS, self._level, np.float32)
         rising = levels > self._retro
         self._retro += (levels - self._retro) * np.where(
             rising, _alpha(dt, _ATTACK_TAU_S), _alpha(dt, 0.12)
         )
         self._retro_peak = np.maximum(self._retro, self._retro_peak - 0.5 * dt)
         block = self._retro_block
-        offset = np.abs(self._retro_within - 0.5) * 2.0  # 0 in a block's middle, 1 at its ends
-        reach = 0.85  # the outer 15% of every block stays dark as a gap
-        lit = offset < self._retro[block] * reach
         colors = _sample(self._lut_linear, block / (_RETRO_BANDS - 1.0))
+        if self._retro_leds < _RETRO_MIN_BAR_LEDS:
+            short: np.ndarray = colors * self._retro[block][:, None]
+            return short
+        # Half an LED, measured in block offsets (a block's half spans ``_retro_leds / 2``).
+        half_led = 1.0 / self._retro_leds
+        reach = min(0.85, 1.0 - half_led)  # the outermost LED of every block stays dark
+        offset = self._retro_offset
+        lit = offset < self._retro[block] * reach
         frame: np.ndarray = colors * lit[:, None]
-        peak_at = self._retro_peak[block] * reach
-        dot = (np.abs(offset - peak_at) < 1.2 / self._retro_leds) & (self._retro_peak[block] > 0.05)
-        frame[dot] = 0.85
+        # The peak dot is the LED nearest the peak, kept out of the gap: a window one LED
+        # wide always holds exactly one LED per side, wherever the LEDs fall in a block.
+        centre = np.minimum(self._retro_peak[block] * reach, reach - half_led)
+        dot = (offset > centre - half_led) & (offset <= centre + half_led) & (offset < reach)
+        frame[dot & (self._retro_peak[block] > 0.05)] = 0.85
         return frame
 
     def _fx_scanner(self, dt: float) -> np.ndarray:
@@ -674,15 +717,19 @@ class Engine:
             self._album_colors,
             self.settings.color,
             self.settings.album_mode,
+            self.settings.colors,
+            steps=self.settings.steps,
         )
 
 
-def palette_swatch(
+def palette_swatch(  # noqa: PLR0913 - one optional input per kind of palette
     palette: Palette,
     album_colors: Iterable[Sequence[int]] = (),
     count: int = 8,
     color: tuple[int, int, int] = DEFAULT_COLOR,
     album_mode: AlbumMode = AlbumMode.VIBRANT,
+    *,
+    colors: Sequence[Sequence[int]] = (),
 ) -> list[tuple[int, int, int]]:
     """
     Return colours spread across a palette's gradient, e.g. to show it in a user interface.
@@ -692,9 +739,11 @@ def palette_swatch(
     :param count: How many colours to return.
     :param color: The custom colour, used by :attr:`Palette.CUSTOM`.
     :param album_mode: How :attr:`Palette.ALBUM` picks colours from the cover.
+    :param colors: The user's own colours, used by :attr:`Palette.MINE`.
     """
     cleaned = tuple((int(c[0]), int(c[1]), int(c[2])) for c in album_colors if len(c) >= 3)
-    linear, _ = _palette_luts(palette, cleaned, color, album_mode)
+    mine = tuple((int(c[0]), int(c[1]), int(c[2])) for c in colors if len(c) >= 3)
+    linear, _ = _palette_luts(palette, cleaned, color, album_mode, mine)
     at = np.linspace(0.0, 1.0, max(count, 2))
     return [
         (int(r * 255 + 0.5), int(g * 255 + 0.5), int(b * 255 + 0.5))
@@ -705,15 +754,26 @@ def palette_swatch(
 # ------------------------------------------------------------------- helpers
 
 
-def _palette_luts(
+def _palette_luts(  # noqa: PLR0913 - one input per kind of palette
     palette: Palette,
     album_colors: tuple[_RGB, ...],
     color: _RGB = DEFAULT_COLOR,
     album_mode: AlbumMode = AlbumMode.VIBRANT,
+    mine: tuple[_RGB, ...] = (),
+    *,
+    steps: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return the (linear, cyclic) colour lookup tables of a palette."""
     stops: tuple[_RGB, ...] | None = None
-    if palette == Palette.CUSTOM:
+    if palette == Palette.MINE and mine:
+        if steps:
+            # Blocks: every colour takes an equal share of the table, without blending.
+            blocks = np.array(mine, np.float32) / 255.0
+            index = np.minimum(np.arange(_LUT_SIZE) * len(mine) // _LUT_SIZE, len(mine) - 1)
+            table: np.ndarray = blocks[index].astype(np.float32)
+            return table, table.copy()
+        stops = mine
+    elif palette == Palette.CUSTOM:
         stops = _custom_stops(color)
     elif palette == Palette.ALBUM:
         # Black-and-white artwork has no colour to show: light it in shades of white

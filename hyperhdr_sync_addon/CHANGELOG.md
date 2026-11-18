@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.0
+
+- A simpler web UI. It shows six popular effects first, with the rest behind "Show all"
+  and grouped by mood; each effect's description sits behind an info button.
+- Colours start with where they come from (Album cover, Palette or Your colour), and only the
+  matching options appear: Artwork colours only for the album cover, the colour picker only
+  for your colour, the solid colour or the night light.
+- Make your own palettes in the web UI: 2 to 6 colours, blended as a gradient or shown as
+  separate swatches. They are saved with the add-on's options.
+- The night light is now a "Keep a soft glow" switch; sensitivity, response and latency are
+  under Fine-tuning; Apply appears only when something has changed.
+- Light and dark mode, following the system or chosen in the page; the page also picks up
+  the colours of the LEDs. One preview, drawn as a monitor with the LED layout from HyperHDR.
+
+## 0.3.4
+
+- Retro keeps its colours on short strips: blocks of fewer than four LEDs show their band by
+  brightness, and the peak dots and gaps take one LED each instead of covering whole blocks.
+- Retro, Colora and Spectrum follow the music on streams that send only the loudness: Retro
+  and Spectrum rise with the level (they were dark), and Colora's colour follows the loudness
+  (it was a fixed light).
+
 ## 0.3.3
 
 - Every effect now does something of its own; four overlapped with others:

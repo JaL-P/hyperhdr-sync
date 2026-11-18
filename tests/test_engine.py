@@ -187,7 +187,7 @@ def test_loudness_only_stream_still_drives_the_lights() -> None:
 
 def test_album_colours_are_used_and_fall_back_to_rainbow() -> None:
     """Artwork colours tint the LEDs; without artwork the rainbow is used."""
-    engine = Engine(_tv_layout(), EngineSettings(effect=Effect.PULSE, palette=Palette.ALBUM))
+    engine = Engine(_tv_layout(), EngineSettings(effect=Effect.LUMINA, palette=Palette.ALBUM))
     engine.set_album_colors([(180, 10, 10)])
     frame = _settle(engine, [LOUD] * SPECTRUM_BINS, frames=40)
     red, green, blue = frame.astype(int).sum(axis=0)
@@ -367,3 +367,66 @@ def test_no_two_effects_do_the_same_thing() -> None:
         worst.append((round(score, 2), a.value, b.value))
     worst.sort(reverse=True)
     assert worst[0][0] < 0.7, f"effects too alike: {worst[:3]}"
+
+
+@pytest.mark.parametrize("count", [8, 16, 24, 60, 120])
+def test_retro_keeps_its_colours_on_short_strips(count: int) -> None:
+    """Retro's peak dots never cover a strip: most lit LEDs keep their band colour."""
+    engine = Engine(LedLayout.strip(count), EngineSettings(effect=Effect.RETRO))
+    frame = _settle(engine, [LOUD] * SPECTRUM_BINS, frames=60).astype(int)
+    lit = frame[frame.max(axis=1) > 40]
+    white = lit.min(axis=1) > 150
+    assert len(lit) >= count // 4
+    assert white.sum() <= len(lit) // 2, f"{white.sum()} of {len(lit)} lit LEDs are white"
+
+
+@pytest.mark.parametrize("count", [32, 33, 34, 40, 50, 60, 120, 301])
+def test_retro_shows_a_peak_dot_on_every_block_at_full_scale(count: int) -> None:
+    """With every band at its maximum each Retro block still has its white peak dot."""
+    layout = LedLayout.strip(count)
+    engine = Engine(layout, EngineSettings(effect=Effect.RETRO))
+    frame = _settle(engine, [LOUD] * SPECTRUM_BINS, frames=80).astype(int)
+    dots = (frame.min(axis=1) > 150) & (frame.max(axis=1) == frame.min(axis=1))
+    ring = (layout.ring - layout.ring.min()) / (layout.ring.max() - layout.ring.min())
+    block = np.minimum((ring * 8).astype(int), 7)
+    per_block = np.bincount(block[dots], minlength=8)
+    assert per_block.min() >= 1, f"blocks without a peak dot: {per_block.tolist()}"
+    assert per_block.max() <= 3, f"peak dots too wide: {per_block.tolist()}"
+
+
+def _play_loudness(effect: Effect, *, kicks: bool) -> np.ndarray:
+    """Play 6 s of loudness without spectrum, steady or with kicks; return the frames."""
+    engine = Engine(_tv_layout(), EngineSettings(effect=effect, palette=Palette.RAINBOW))
+    frames = []
+    for i in range(int(6 / DT)):
+        t = i * DT
+        kick = math.exp(-((t * 2.0) % 1.0) * 7.0) if kicks else 0.5
+        level = 0.3 if kicks and 3.0 <= t < 4.0 else 1.0
+        frame = _frame(engine, None, loudness=int((0.45 + 0.4 * kick * level) * 65535))
+        frames.append(frame.astype(float) / 255.0)
+    return np.array(frames[40:])  # (time, LED, colour), after settling
+
+
+@pytest.mark.parametrize("effect", [effect for effect in Effect if effect != Effect.MANUAL])
+def test_every_effect_follows_a_loudness_only_stream(effect: Effect) -> None:
+    """Without spectrum data every effect still lights up and shows how the music goes."""
+    steady = _play_loudness(effect, kicks=False)
+    kicking = _play_loudness(effect, kicks=True)
+    assert kicking.max() > 0.25, "dark without spectrum data"
+    assert np.abs(kicking - steady).mean() > 0.05, "the same light whatever the music does"
+
+
+def test_own_palette_blends_or_shows_blocks() -> None:
+    """The user's palette blends its colours, or as blocks shows only the colours themselves."""
+    red, blue = (255, 0, 0), (0, 0, 255)
+    blended = palette_swatch(Palette.MINE, count=9, colors=[red, blue])
+    assert blended[0] == red
+    assert blended[-1] == blue
+    assert any(c not in (red, blue) for c in blended), "a gradient has colours in between"
+    engine = Engine(
+        _tv_layout(), EngineSettings(palette=Palette.MINE, colors=(red, blue), steps=True)
+    )
+    swatch = engine._lut_linear  # noqa: SLF001 - the table the effects draw from
+    colours = {tuple(int(v * 255 + 0.5) for v in row) for row in swatch}
+    assert colours == {red, blue}
+    assert palette_swatch(Palette.MINE) == palette_swatch(Palette.RAINBOW), "no colours: rainbow"

@@ -102,6 +102,7 @@ PALETTE_LABELS = {
     Palette.CANDY: "Candy",
     Palette.PASTEL: "Pastel",
 }
+# Palette.MINE is left out: the user makes it on the page instead of picking it.
 ALBUM_MODE_LABELS = {
     AlbumMode.VIBRANT: ("Vibrant", "Every cover colour, boosted to full brightness"),
     AlbumMode.DOMINANT: ("Dominant", "Only the main colour of the cover, with nearby shades"),
@@ -120,6 +121,10 @@ BRIGHTNESS_RANGE = (0, 100)
 SENSITIVITY_RANGE = (-12.0, 12.0)
 LATENCY_RANGE = (0, 2000)
 NIGHT_LIGHT_RANGE = (0, 100)
+# Colours of a palette of the user's own, and how many such palettes the page keeps.
+PALETTE_COLORS_RANGE = (2, 6)
+MAX_MY_PALETTES = 12
+MAX_PALETTE_NAME = 24
 
 
 @dataclass(frozen=True)
@@ -130,6 +135,17 @@ class UiSettings:
     latency_ms: int
     night_light: float
     """Night light brightness, 0..1 (0: hand the LEDs back to HyperHDR when idle)."""
+    my_palettes: tuple[MyPalette, ...] = ()
+    """The palettes the user made on the page, to pick from again."""
+
+
+@dataclass(frozen=True)
+class MyPalette:
+    """A palette the user made: a name and its colours, blended or as blocks."""
+
+    name: str
+    colors: tuple[tuple[int, int, int], ...]
+    steps: bool = False
 
 
 def settings_to_dict(settings: UiSettings) -> dict[str, Any]:
@@ -149,6 +165,13 @@ def settings_to_dict(settings: UiSettings) -> dict[str, Any]:
         "color": hex_color(engine.color),
         "night_light": round(settings.night_light * 100),
         "album_mode": engine.album_mode.value,
+        "colors": [hex_color(c) for c in engine.colors],
+        "steps": engine.steps,
+        # Add-on options take no list inside a list: each palette's colours are one string.
+        "my_palettes": [
+            {"name": p.name, "colors": ",".join(hex_color(c) for c in p.colors), "steps": p.steps}
+            for p in settings.my_palettes
+        ],
     }
 
 
@@ -171,8 +194,13 @@ def parse_settings(data: Any) -> UiSettings:
         color = parse_hex_color(str(data["color"]))
         night_light = int(data["night_light"])
         album_mode = AlbumMode(str(data["album_mode"]))
+        colors = _parse_colors(data.get("colors", []))
+        steps = bool(data.get("steps", False))
+        my_palettes = _parse_my_palettes(data.get("my_palettes", []))
     except (KeyError, TypeError) as err:
         raise ValueError(f"missing or invalid setting: {err}") from err
+    if palette == Palette.MINE and len(colors) < PALETTE_COLORS_RANGE[0]:
+        raise ValueError(f"your own palette needs at least {PALETTE_COLORS_RANGE[0]} colours")
     for name, value, (low, high) in (
         ("brightness", brightness, BRIGHTNESS_RANGE),
         ("sensitivity", sensitivity, SENSITIVITY_RANGE),
@@ -189,8 +217,51 @@ def parse_settings(data: Any) -> UiSettings:
         response=response,
         color=color,
         album_mode=album_mode,
+        colors=colors,
+        steps=steps,
     )
-    return UiSettings(engine, latency_ms, night_light / 100.0)
+    return UiSettings(engine, latency_ms, night_light / 100.0, my_palettes)
+
+
+def _parse_colors(value: Any) -> tuple[tuple[int, int, int], ...]:
+    """
+    Parse the colours of a palette: a list of ``#rrggbb``, or one comma-separated string.
+
+    :param value: The colours; empty for none.
+    :raises ValueError: When a colour is invalid or there are too many.
+    """
+    items = value.split(",") if isinstance(value, str) else value
+    if not isinstance(items, list | tuple):
+        raise ValueError("colours must be a list")  # noqa: TRY004 - callers expect ValueError
+    colors = tuple(parse_hex_color(str(item)) for item in items if str(item).strip())
+    if len(colors) > PALETTE_COLORS_RANGE[1]:
+        raise ValueError(f"a palette has at most {PALETTE_COLORS_RANGE[1]} colours")
+    return colors
+
+
+def _parse_my_palettes(value: Any) -> tuple[MyPalette, ...]:
+    """
+    Parse the user's saved palettes.
+
+    :param value: A list of objects with ``name``, ``colors`` and ``steps``.
+    :raises ValueError: When a palette is invalid or there are too many.
+    """
+    if not isinstance(value, list | tuple):
+        raise ValueError("my_palettes must be a list")  # noqa: TRY004 - callers expect ValueError
+    if len(value) > MAX_MY_PALETTES:
+        raise ValueError(f"keep at most {MAX_MY_PALETTES} palettes of your own")
+    palettes = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("each palette must be an object")  # noqa: TRY004
+        name = str(item.get("name", "")).strip()
+        colors = _parse_colors(item.get("colors", []))
+        if not name or len(name) > MAX_PALETTE_NAME:
+            raise ValueError(f"a palette needs a name of 1 to {MAX_PALETTE_NAME} characters")
+        if len(colors) < PALETTE_COLORS_RANGE[0]:
+            raise ValueError(f"palette {name!r} needs at least {PALETTE_COLORS_RANGE[0]} colours")
+        palettes.append(MyPalette(name, colors, bool(item.get("steps", False))))
+    return tuple(palettes)
 
 
 class WebUi:
@@ -203,6 +274,7 @@ class WebUi:
         *,
         saver: Saver | None = None,
         allowed_remote: str | None = None,
+        my_palettes: tuple[MyPalette, ...] = (),
     ) -> None:
         """
         Initialize the web UI.
@@ -212,7 +284,9 @@ class WebUi:
         :param saver: Stores applied settings permanently; without it they last until
             the bridge restarts.
         :param allowed_remote: The only client address allowed to connect, if any.
+        :param my_palettes: The palettes the user made, as saved last time.
         """
+        self._my_palettes = my_palettes
         self._bridge = bridge
         self._demo = demo
         self._saver = saver
@@ -297,6 +371,8 @@ class WebUi:
                     "sensitivity": SENSITIVITY_RANGE,
                     "latency_ms": LATENCY_RANGE,
                     "night_light": NIGHT_LIGHT_RANGE,
+                    "palette_colors": PALETTE_COLORS_RANGE,
+                    "my_palettes": (0, MAX_MY_PALETTES),
                 },
                 "playing": self._bridge.streaming,
                 "saves": self._saver is not None,
@@ -309,6 +385,7 @@ class WebUi:
         except (ValueError, json.JSONDecodeError) as err:
             return web.json_response({"error": str(err)}, status=400)
         self._bridge.apply(settings.engine, settings.latency_ms, settings.night_light)
+        self._my_palettes = settings.my_palettes
         self._set_preview(settings.engine)
         self._preview_night_light = settings.night_light
         result: dict[str, Any] = {"settings": self._current(), "saved": False}
@@ -430,7 +507,9 @@ class WebUi:
     def _current(self) -> dict[str, Any]:
         bridge = self._bridge
         return settings_to_dict(
-            UiSettings(bridge.engine.settings, bridge.latency_ms, bridge.night_light)
+            UiSettings(
+                bridge.engine.settings, bridge.latency_ms, bridge.night_light, self._my_palettes
+            )
         )
 
     def _album_modes(self) -> list[dict[str, Any]]:
@@ -553,6 +632,7 @@ async def start_web_ui(  # noqa: PLR0913
     """
     saver: Saver | None = None
     allowed_remote: str | None = None
+    my_palettes: tuple[MyPalette, ...] = ()
     if supervisor:
         info = await supervisor_info(session)
         # A host-network add-on is reached on the gateway of Home Assistant's internal
@@ -562,8 +642,14 @@ async def start_web_ui(  # noqa: PLR0913
         host, port = str(gateway), int(info["ingress_port"])
         allowed_remote = str(gateway + 1)
         saver = supervisor_saver(session)
+        try:
+            my_palettes = _parse_my_palettes(info.get("options", {}).get("my_palettes", []))
+        except ValueError as err:
+            LOGGER.warning("Ignoring the saved palettes: %s", err)
     runner = web.AppRunner(
-        WebUi(bridge, demo, saver=saver, allowed_remote=allowed_remote).make_app(),
+        WebUi(
+            bridge, demo, saver=saver, allowed_remote=allowed_remote, my_palettes=my_palettes
+        ).make_app(),
         access_log=None,
     )
     await runner.setup()

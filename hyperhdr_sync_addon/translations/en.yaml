@@ -13,10 +13,19 @@ configuration:
     description: "spectrum, vu (level meter), pulse, ripple, scroll, energy, ambient, lumina (adaptive brightness), colora (adaptive colour), retro, scanner, rhythm, party, or manual (the custom colour, not following the music). The web UI previews them."
   palette:
     name: "Colours"
-    description: "album uses the colours of the cover art, classic is green-yellow-red, custom uses shades of the custom colour."
+    description: "album uses the colours of the cover art, classic is green-yellow-red, custom uses shades of the custom colour, mine uses your own palette (make it in the web UI)."
   album_mode:
     name: "Artwork colours"
     description: "How the album colours are picked from the cover: vibrant (all colours, boosted), dominant (the main colour), accent, natural (as on the cover), pastel or contrast (main colour and its opposite)."
+  colors:
+    name: "Your palette's colours"
+    description: "#rrggbb colours of the 'mine' palette, 2 to 6. Easiest to make in the web UI."
+  steps:
+    name: "Your palette as blocks"
+    description: "Show the 'mine' palette as separate blocks of colour instead of blending them."
+  my_palettes:
+    name: "Saved palettes"
+    description: "Palettes you made in the web UI, to pick from again. Managed by the web UI."
   color:
     name: "Custom colour"
     description: "#rrggbb. Used by the manual effect, the custom colours and the night light."

@@ -1,5 +1,5 @@
 name: "HyperHDR Sync"
-version: "0.3.3"
+version: "0.4.0"
 slug: "hyperhdr_sync"
 description: "Makes your HyperHDR LEDs react to the music Music Assistant plays"
 url: "https://github.com/JaL-P/hyperhdr-sync"
@@ -30,6 +30,9 @@ options:
   latency_ms: 120
   color: "#ff9329"
   album_mode: "vibrant"
+  colors: []
+  steps: false
+  my_palettes: []
   night_light: 0
   udp_port: 5568
   web_port: 8090
@@ -40,13 +43,22 @@ schema:
   hyperhdr_host: "str"
   name: "str"
   effect: "list(spectrum|vu|pulse|ripple|scroll|energy|ambient|lumina|colora|retro|scanner|rhythm|party|manual)"
-  palette: "list(album|rainbow|sunset|ocean|fire|forest|neon|aurora|pastel|ice|candy|lava|warm|classic|custom)"
+  palette: "list(album|rainbow|sunset|ocean|fire|forest|neon|aurora|pastel|ice|candy|lava|warm|classic|custom|mine)"
   brightness: "int(0,100)"
   sensitivity: "float(-12,12)"
   response: "list(snappy|balanced|smooth)"
   latency_ms: "int(0,2000)"
   color: "match(^#[0-9a-fA-F]{6}$)"
   album_mode: "list(vibrant|dominant|accent|natural|pastel|contrast)"
+  # the colours of the "mine" palette, which the web UI makes
+  colors:
+    - "match(^#[0-9a-fA-F]{6}$)"
+  steps: "bool"
+  # palettes made in the web UI; each palette's colours are one comma-separated string
+  my_palettes:
+    - name: "str"
+      colors: "match(^#[0-9a-fA-F]{6}(,#[0-9a-fA-F]{6}){1,5}$)"
+      steps: "bool"
   night_light: "int(0,100)"
   udp_port: "port"
   web_port: "port"
