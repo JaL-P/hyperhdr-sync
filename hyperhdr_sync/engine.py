@@ -635,8 +635,10 @@ class Engine:
         offset = self._retro_offset
         lit = offset < self._retro[block] * reach
         frame: np.ndarray = colors * lit[:, None]
-        peak_at = self._retro_peak[block] * reach
-        dot = (np.abs(offset - peak_at) < half_led) & (offset < reach)
+        # The peak dot is the LED nearest the peak, kept out of the gap: a window one LED
+        # wide always holds exactly one LED per side, wherever the LEDs fall in a block.
+        centre = np.minimum(self._retro_peak[block] * reach, reach - half_led)
+        dot = (offset > centre - half_led) & (offset <= centre + half_led) & (offset < reach)
         frame[dot & (self._retro_peak[block] > 0.05)] = 0.85
         return frame
 

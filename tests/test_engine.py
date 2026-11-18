@@ -380,6 +380,20 @@ def test_retro_keeps_its_colours_on_short_strips(count: int) -> None:
     assert white.sum() <= len(lit) // 2, f"{white.sum()} of {len(lit)} lit LEDs are white"
 
 
+@pytest.mark.parametrize("count", [32, 33, 34, 40, 50, 60, 120, 301])
+def test_retro_shows_a_peak_dot_on_every_block_at_full_scale(count: int) -> None:
+    """With every band at its maximum each Retro block still has its white peak dot."""
+    layout = LedLayout.strip(count)
+    engine = Engine(layout, EngineSettings(effect=Effect.RETRO))
+    frame = _settle(engine, [LOUD] * SPECTRUM_BINS, frames=80).astype(int)
+    dots = (frame.min(axis=1) > 150) & (frame.max(axis=1) == frame.min(axis=1))
+    ring = (layout.ring - layout.ring.min()) / (layout.ring.max() - layout.ring.min())
+    block = np.minimum((ring * 8).astype(int), 7)
+    per_block = np.bincount(block[dots], minlength=8)
+    assert per_block.min() >= 1, f"blocks without a peak dot: {per_block.tolist()}"
+    assert per_block.max() <= 3, f"peak dots too wide: {per_block.tolist()}"
+
+
 def _play_loudness(effect: Effect, *, kicks: bool) -> np.ndarray:
     """Play 6 s of loudness without spectrum, steady or with kicks; return the frames."""
     engine = Engine(_tv_layout(), EngineSettings(effect=effect, palette=Palette.RAINBOW))
