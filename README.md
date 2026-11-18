@@ -111,20 +111,20 @@ off while Music Assistant starts, and re-reads the layout when music starts.
 
 | Effect | What you see |
 |---|---|
-| Lumina | Adaptive brightness: one calm colour on every LED, brighter when the music is louder |
-| Colora | Adaptive colour: steady brightness, the colour slides along the palette with the sound, bass to treble |
-| Retro | A segmented level meter with a peak cap, like an old hi-fi (try the Classic colours) |
+| Lumina | One calm colour that gets brighter as the music gets louder |
+| Colora | Steady brightness; the colour follows the sound, bass to treble |
+| Retro | Graphic equaliser: eight frequency blocks with peak dots, like an old hi-fi (try the Classic colours) |
 | Scanner | A light sweeping back and forth with a trail; faster when louder, flashing on beats |
 | Rhythm | Colour blocks that swap on every beat |
 | Party | Random colour bursts on beats and sparkles on the treble |
 | Manual | Every LED in the custom colour; does not follow the music |
 | Spectrum | Bass at the bottom of both sides, rising to treble at top-centre |
-| Level meter | Loudness climbing both sides, with a falling peak marker |
-| Pulse | All LEDs breathe with the bass and flash on beats; the colour steps on each beat |
+| Level meter | One meter climbing both sides with the loudness, with a falling peak |
+| Pulse | Every LED flashes on the beat and goes dark in between |
 | Ripple | Every beat launches a wave from the bottom of both sides up to the top |
 | Scroll | The colour of the current sound flows upwards |
-| Energy | Three overlapping bars for bass, mids and treble |
-| Ambient | Slowly rotating colours whose brightness gently follows the music |
+| Energy | Bass rises from the bottom, treble drops from the top; they meet in between |
+| Ambient | Calm colours turning around the screen; the music sets the speed, not the brightness |
 
 Brightness adapts to each track by itself: every frequency band is scaled against its own recent
 maximum, so quiet and loud recordings both use the full range.

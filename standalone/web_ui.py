@@ -58,19 +58,31 @@ _SUPERVISOR_TIMEOUT_S = 10.0
 
 # (label, short description) per effect, in the order the page shows them.
 EFFECT_LABELS = {
-    Effect.LUMINA: ("Lumina", "Adaptive brightness: one calm colour, brighter when louder"),
-    Effect.COLORA: ("Colora", "Adaptive colour: the colour follows the sound, bass to treble"),
+    Effect.LUMINA: ("Lumina", "One calm colour that gets brighter as the music gets louder"),
+    Effect.COLORA: ("Colora", "Steady brightness; the colour follows the sound, bass to treble"),
     Effect.SPECTRUM: ("Spectrum", "Bass at the bottom rising to treble at the top"),
-    Effect.RETRO: ("Retro", "Segmented level meter with a peak cap, like an old hi-fi"),
+    Effect.RETRO: (
+        "Retro",
+        "Graphic equaliser: eight frequency blocks with peak dots, like an old hi-fi",
+    ),
     Effect.SCANNER: ("Scanner", "A light sweeping back and forth, faster when louder"),
     Effect.RHYTHM: ("Rhythm", "Colour blocks that swap on every beat"),
     Effect.PARTY: ("Party", "Random colour bursts on beats, sparkles on the treble"),
-    Effect.VU: ("Level meter", "Loudness climbing both sides with a falling peak"),
-    Effect.PULSE: ("Pulse", "Everything breathes with the bass and flashes on beats"),
+    Effect.VU: (
+        "Level meter",
+        "One meter climbing both sides with the loudness, with a falling peak",
+    ),
+    Effect.PULSE: ("Pulse", "Every LED flashes on the beat and goes dark in between"),
     Effect.RIPPLE: ("Ripple", "A wave from the bottom to the top on every beat"),
     Effect.SCROLL: ("Scroll", "The colour of the sound flowing upwards"),
-    Effect.ENERGY: ("Energy", "Bars for bass, mids and treble"),
-    Effect.AMBIENT: ("Ambient", "Slowly turning colours that breathe with the music"),
+    Effect.ENERGY: (
+        "Energy",
+        "Bass rises from the bottom, treble drops from the top; they meet in between",
+    ),
+    Effect.AMBIENT: (
+        "Ambient",
+        "Calm colours turning around the screen; the music sets the speed, not the brightness",
+    ),
     Effect.MANUAL: ("Manual", "Every LED in the custom colour; does not follow the music"),
 }
 PALETTE_LABELS = {

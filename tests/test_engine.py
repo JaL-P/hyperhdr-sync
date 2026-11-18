@@ -1,5 +1,8 @@
 """Tests of the rendering engine and the LED layout; they need no server."""
 
+import itertools
+import math
+
 import numpy as np
 import pytest
 
@@ -200,7 +203,7 @@ def test_album_colours_are_used_and_fall_back_to_rainbow() -> None:
 def test_black_and_white_artwork_gives_white_light() -> None:
     """Greyscale artwork lights the LEDs in shades of white, never in rainbow red."""
     bass = [LOUD] * 4 + [0] * (SPECTRUM_BINS - 4)
-    for effect in (Effect.SPECTRUM, Effect.PULSE, Effect.ENERGY):
+    for effect in (Effect.SPECTRUM, Effect.LUMINA, Effect.ENERGY):
         engine = Engine(_tv_layout(), EngineSettings(effect=effect, palette=Palette.ALBUM))
         engine.set_album_colors([(240, 240, 240), (90, 90, 90), (10, 10, 10)])
         frame = _settle(engine, bass, frames=40).astype(int)
@@ -302,3 +305,65 @@ def test_changing_the_album_mode_rebuilds_the_palette() -> None:
     blue = _settle(engine, [LOUD] * SPECTRUM_BINS, frames=60).astype(int).sum(axis=0)
     assert red[0] > red[2]
     assert blue[2] > blue[0]
+
+
+def _effect_signature(effect: Effect) -> dict[str, np.ndarray]:
+    """Play the same 12 s of music through an effect and describe how its LEDs behave."""
+    engine = Engine(_tv_layout(), EngineSettings(effect=effect, palette=Palette.RAINBOW))
+    frames = []
+    for i in range(int(12 / DT)):
+        t = i * DT
+        kick = math.exp(-((t * 2.0) % 1.0) * 7.0)
+        hat = math.exp(-((t * 2.0 + 0.5) % 1.0) * 10.0)
+        sweep = 0.5 + 0.5 * math.sin(t * 0.9)
+        level = 0.25 if 6.0 <= t < 8.0 else 1.0  # a quiet break
+        spectrum = []
+        for band in range(SPECTRUM_BINS):
+            x = band / (SPECTRUM_BINS - 1)
+            value = max(
+                kick * math.exp(-(((x - 0.08) / 0.12) ** 2)),
+                (0.5 + 0.3 * math.sin(t * 2.3 + band))
+                * math.exp(-(((x - 0.2 - 0.6 * sweep) / 0.15) ** 2)),
+                hat * math.exp(-(((x - 0.9) / 0.1) ** 2)),
+            )
+            spectrum.append(int((0.3 + 0.55 * value * level) * 65535))
+        engine.feed(loudness=int((0.5 + 0.35 * kick * level) * 65535), spectrum=spectrum)
+        frames.append(np.frombuffer(engine.render(DT), np.uint8).reshape(-1, 3).max(axis=1))
+    light = np.array(frames[80:], float) / 255.0  # (time, LED), after settling
+    return {
+        "pattern": light,
+        "time": light.mean(axis=1),
+        "space": light.mean(axis=0),
+        "motion": np.abs(np.diff(light, axis=0)).mean(axis=0),
+    }
+
+
+def _correlation(a: np.ndarray, b: np.ndarray) -> float:
+    a = a - a.mean()
+    b = b - b.mean()
+    scale = math.sqrt(float((a * a).sum() * (b * b).sum()))
+    return float((a * b).sum() / scale) if scale > 1e-9 else 0.0
+
+
+def test_no_two_effects_do_the_same_thing() -> None:
+    """
+    Every pair of effects looks clearly different on the same music.
+
+    Similarity averages how alike two effects are in their LED pattern, their brightness
+    over time, where the light sits and where it moves. Bars that simply grow with the
+    loudness, for example, score about 0.8 against each other.
+    """
+    effects = [effect for effect in Effect if effect != Effect.MANUAL]
+    signatures = {effect: _effect_signature(effect) for effect in effects}
+    worst = []
+    for a, b in itertools.combinations(effects, 2):
+        score = (
+            sum(
+                max(0.0, _correlation(signatures[a][key], signatures[b][key]))
+                for key in ("pattern", "time", "space", "motion")
+            )
+            / 4
+        )
+        worst.append((round(score, 2), a.value, b.value))
+    worst.sort(reverse=True)
+    assert worst[0][0] < 0.7, f"effects too alike: {worst[:3]}"

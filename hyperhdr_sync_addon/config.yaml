@@ -1,5 +1,5 @@
 name: "HyperHDR Sync"
-version: "0.3.2"
+version: "0.3.3"
 slug: "hyperhdr_sync"
 description: "Makes your HyperHDR LEDs react to the music Music Assistant plays"
 url: "https://github.com/JaL-P/hyperhdr-sync"

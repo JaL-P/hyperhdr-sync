@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.3
+
+- Every effect now does something of its own; four overlapped with others:
+  - Retro is a graphic equaliser: eight frequency blocks with peak dots (it was a segmented
+    Level meter).
+  - Energy pits bass rising from the bottom against treble dropping from the top (it was bars
+    growing like the Level meter).
+  - Pulse only flashes on the beat (it breathed with the bass like Lumina).
+  - Ambient keeps a steady brightness and the music sets how fast its colours turn.
+  - Colora keeps a steady brightness; only its colour follows the sound.
+
 ## 0.3.2
 
 - The preview now stays in step with the LEDs while music plays: with unchanged settings it
