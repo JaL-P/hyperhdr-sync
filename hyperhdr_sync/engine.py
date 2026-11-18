@@ -131,6 +131,8 @@ class Palette(StrEnum):
     """Green, yellow, red: the colours of a classic level meter."""
     CUSTOM = "custom"
     """Shades of the custom colour."""
+    MINE = "mine"
+    """The user's own colours (:attr:`EngineSettings.colors`), blended or as blocks."""
 
 
 class Response(StrEnum):
@@ -196,6 +198,10 @@ class EngineSettings:
     """Custom colour (RGB 0-255), for the Manual effect, the Custom palette and the night light."""
     album_mode: AlbumMode = AlbumMode.VIBRANT
     """How the Album art palette picks colours from the cover."""
+    colors: tuple[tuple[int, int, int], ...] = ()
+    """The colours of :attr:`Palette.MINE` (RGB 0-255), in order."""
+    steps: bool = False
+    """Show :attr:`Palette.MINE` as separate blocks of colour instead of blending them."""
 
 
 def parse_hex_color(value: str) -> tuple[int, int, int]:
@@ -265,6 +271,10 @@ class Engine:
             or (
                 settings.palette == Palette.ALBUM
                 and settings.album_mode != self.settings.album_mode
+            )
+            or (
+                settings.palette == Palette.MINE
+                and (settings.colors, settings.steps) != (self.settings.colors, self.settings.steps)
             )
         )
         self.settings = settings
@@ -707,15 +717,19 @@ class Engine:
             self._album_colors,
             self.settings.color,
             self.settings.album_mode,
+            self.settings.colors,
+            steps=self.settings.steps,
         )
 
 
-def palette_swatch(
+def palette_swatch(  # noqa: PLR0913 - one optional input per kind of palette
     palette: Palette,
     album_colors: Iterable[Sequence[int]] = (),
     count: int = 8,
     color: tuple[int, int, int] = DEFAULT_COLOR,
     album_mode: AlbumMode = AlbumMode.VIBRANT,
+    *,
+    colors: Sequence[Sequence[int]] = (),
 ) -> list[tuple[int, int, int]]:
     """
     Return colours spread across a palette's gradient, e.g. to show it in a user interface.
@@ -725,9 +739,11 @@ def palette_swatch(
     :param count: How many colours to return.
     :param color: The custom colour, used by :attr:`Palette.CUSTOM`.
     :param album_mode: How :attr:`Palette.ALBUM` picks colours from the cover.
+    :param colors: The user's own colours, used by :attr:`Palette.MINE`.
     """
     cleaned = tuple((int(c[0]), int(c[1]), int(c[2])) for c in album_colors if len(c) >= 3)
-    linear, _ = _palette_luts(palette, cleaned, color, album_mode)
+    mine = tuple((int(c[0]), int(c[1]), int(c[2])) for c in colors if len(c) >= 3)
+    linear, _ = _palette_luts(palette, cleaned, color, album_mode, mine)
     at = np.linspace(0.0, 1.0, max(count, 2))
     return [
         (int(r * 255 + 0.5), int(g * 255 + 0.5), int(b * 255 + 0.5))
@@ -738,15 +754,26 @@ def palette_swatch(
 # ------------------------------------------------------------------- helpers
 
 
-def _palette_luts(
+def _palette_luts(  # noqa: PLR0913 - one input per kind of palette
     palette: Palette,
     album_colors: tuple[_RGB, ...],
     color: _RGB = DEFAULT_COLOR,
     album_mode: AlbumMode = AlbumMode.VIBRANT,
+    mine: tuple[_RGB, ...] = (),
+    *,
+    steps: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return the (linear, cyclic) colour lookup tables of a palette."""
     stops: tuple[_RGB, ...] | None = None
-    if palette == Palette.CUSTOM:
+    if palette == Palette.MINE and mine:
+        if steps:
+            # Blocks: every colour takes an equal share of the table, without blending.
+            blocks = np.array(mine, np.float32) / 255.0
+            index = np.minimum(np.arange(_LUT_SIZE) * len(mine) // _LUT_SIZE, len(mine) - 1)
+            table: np.ndarray = blocks[index].astype(np.float32)
+            return table, table.copy()
+        stops = mine
+    elif palette == Palette.CUSTOM:
         stops = _custom_stops(color)
     elif palette == Palette.ALBUM:
         # Black-and-white artwork has no colour to show: light it in shades of white

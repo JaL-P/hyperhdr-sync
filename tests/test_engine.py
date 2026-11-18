@@ -414,3 +414,19 @@ def test_every_effect_follows_a_loudness_only_stream(effect: Effect) -> None:
     kicking = _play_loudness(effect, kicks=True)
     assert kicking.max() > 0.25, "dark without spectrum data"
     assert np.abs(kicking - steady).mean() > 0.05, "the same light whatever the music does"
+
+
+def test_own_palette_blends_or_shows_blocks() -> None:
+    """The user's palette blends its colours, or as blocks shows only the colours themselves."""
+    red, blue = (255, 0, 0), (0, 0, 255)
+    blended = palette_swatch(Palette.MINE, count=9, colors=[red, blue])
+    assert blended[0] == red
+    assert blended[-1] == blue
+    assert any(c not in (red, blue) for c in blended), "a gradient has colours in between"
+    engine = Engine(
+        _tv_layout(), EngineSettings(palette=Palette.MINE, colors=(red, blue), steps=True)
+    )
+    swatch = engine._lut_linear  # noqa: SLF001 - the table the effects draw from
+    colours = {tuple(int(v * 255 + 0.5) for v in row) for row in swatch}
+    assert colours == {red, blue}
+    assert palette_swatch(Palette.MINE) == palette_swatch(Palette.RAINBOW), "no colours: rainbow"

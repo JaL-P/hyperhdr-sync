@@ -34,6 +34,9 @@ the add-on's configuration.
   Pastel or Contrast (the main colour and its opposite).
 - **Custom colour**: `#rrggbb`, for the Manual effect, the Custom colour palette and the night
   light.
+- **Your palette's colours**, **Your palette as blocks**, **Saved palettes**: the palettes you
+  make in the web UI (Colours > Palette > New palette) and the one in use with the `mine`
+  colours. Easiest to manage in the web UI, which saves them here.
 - **Effect**, **Colours**, **Brightness**, **Sensitivity**, **Response**, **Latency**: how the
   lights look. The web UI changes them without a restart; after changing them here, restart the
   add-on.

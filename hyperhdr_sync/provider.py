@@ -89,7 +89,11 @@ class HyperHdrProvider(PluginProvider):
                 key=CONF_PALETTE,
                 type=ConfigEntryType.STRING,
                 default_value=DEFAULT_PALETTE.value,
-                options=[ConfigValueOption(palette.value) for palette in Palette],
+                options=[
+                    ConfigValueOption(palette.value)
+                    for palette in Palette
+                    if palette != Palette.MINE
+                ],
                 immediate_apply=True,
                 category="settings",
             ),

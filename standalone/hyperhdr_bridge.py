@@ -477,6 +477,8 @@ async def run(args: argparse.Namespace) -> None:
             response=Response(args.response),
             color=args.color,
             album_mode=AlbumMode(args.album_mode),
+            colors=args.colors,
+            steps=args.steps,
         )
         bridge = Bridge(Engine(layout, settings), sender, args.latency_ms, args.night_light / 100.0)
         # Stop as cleanly on SIGTERM (a service or container stopping) as on Ctrl+C.
@@ -515,6 +517,22 @@ async def run(args: argparse.Namespace) -> None:
             sender.close()
             if web_runner is not None:
                 await web_runner.cleanup()
+
+
+def _parse_colors(value: str) -> tuple[tuple[int, int, int], ...]:
+    """
+    Parse the ``--colors`` argument: 2 to 6 ``#rrggbb`` colours separated by commas.
+
+    :param value: The argument.
+    :raises argparse.ArgumentTypeError: When a colour is invalid or the count is wrong.
+    """
+    try:
+        colors = tuple(parse_hex_color(part) for part in value.split(",") if part.strip())
+    except ValueError as err:
+        raise argparse.ArgumentTypeError(str(err)) from err
+    if not 2 <= len(colors) <= 6:
+        raise argparse.ArgumentTypeError("give 2 to 6 colours")
+    return colors
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -568,6 +586,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=parse_hex_color,
         default="#ff9329",
         help="custom colour #rrggbb, for the manual effect, the custom palette and the night light",
+    )
+    parser.add_argument(
+        "--colors",
+        type=_parse_colors,
+        default=(),
+        help="the colours of the 'mine' palette: 2 to 6 #rrggbb, separated by commas",
+    )
+    parser.add_argument(
+        "--steps",
+        action="store_true",
+        help="show the 'mine' palette as blocks of colour instead of blending them",
     )
     parser.add_argument(
         "--night-light",

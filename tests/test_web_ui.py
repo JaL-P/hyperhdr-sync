@@ -45,6 +45,8 @@ GOOD = {
     "night_light": 30,
     "album_mode": "accent",
 }
+# What the page gets back for GOOD: the values as numbers, and no palette of the user's own.
+APPLIED = {**GOOD, "sensitivity": 3.0, "colors": [], "steps": False, "my_palettes": []}
 
 
 class _NullSender:
@@ -84,7 +86,7 @@ def test_parse_settings_checks_values() -> None:
     )
     assert settings.latency_ms == 200
     assert settings.night_light == 0.3
-    assert web_ui.settings_to_dict(settings) == {**GOOD, "sensitivity": 3.0}
+    assert web_ui.settings_to_dict(settings) == APPLIED
     for bad in (
         {**GOOD, "effect": "strobe"},
         {**GOOD, "brightness": 101},
@@ -95,9 +97,39 @@ def test_parse_settings_checks_values() -> None:
         {**GOOD, "album_mode": "sepia"},
         {k: v for k, v in GOOD.items() if k != "palette"},
         ["not", "an", "object"],
+        {**GOOD, "palette": "mine", "colors": ["#ff0000"]},
+        {**GOOD, "colors": ["#ff0000"] * 7},
+        {**GOOD, "colors": ["red", "blue"]},
+        {**GOOD, "my_palettes": [{"name": "", "colors": "#ff0000,#0000ff"}]},
+        {**GOOD, "my_palettes": [{"name": "One", "colors": "#ff0000"}]},
+        {**GOOD, "my_palettes": [{"name": "x", "colors": "#ff0000,#0000ff"}] * 13},
+        {**GOOD, "my_palettes": "Movie night"},
     ):
         with pytest.raises(ValueError):  # noqa: PT011
             web_ui.parse_settings(bad)
+
+
+def test_own_palettes_round_trip() -> None:
+    """A palette of the user's own reaches the engine, and saved palettes come back unchanged."""
+    mine = {
+        **GOOD,
+        "palette": "mine",
+        "colors": ["#ff0000", "#00ff00", "#0000ff"],
+        "steps": True,
+        "my_palettes": [
+            {"name": "Movie night", "colors": "#ff0000,#00ff00,#0000ff", "steps": True},
+            {"name": "Sea", "colors": ["#003366", "#00ccff"], "steps": False},
+        ],
+    }
+    settings = web_ui.parse_settings(mine)
+    assert settings.engine.palette == Palette.MINE
+    assert settings.engine.colors == ((255, 0, 0), (0, 255, 0), (0, 0, 255))
+    assert settings.engine.steps is True
+    assert [p.name for p in settings.my_palettes] == ["Movie night", "Sea"]
+    back = web_ui.settings_to_dict(settings)
+    assert back["colors"] == mine["colors"]
+    assert back["my_palettes"][1] == {"name": "Sea", "colors": "#003366,#00ccff", "steps": False}
+    assert web_ui.parse_settings(back) == settings
 
 
 async def test_page_state_and_apply() -> None:
@@ -113,7 +145,7 @@ async def test_page_state_and_apply() -> None:
         assert len(state["leds"]["x"]) == 12
         assert state["settings"]["effect"] == "spectrum"
         assert state["saves"] is False
-        assert {p["id"] for p in state["palettes"]} == {p.value for p in Palette}
+        assert {p["id"] for p in state["palettes"]} == {p.value for p in Palette} - {"mine"}
         assert {m["id"] for m in state["album_modes"]} == {m.value for m in AlbumMode}
         assert all(len(p["colors"]) >= 2 for p in state["palettes"])
 
@@ -122,7 +154,7 @@ async def test_page_state_and_apply() -> None:
         assert bridge.engine.settings.effect == Effect.SPECTRUM
 
         result = await (await client.post("/api/apply", json=GOOD)).json()
-        assert result == {"settings": {**GOOD, "sensitivity": 3.0}, "saved": False}
+        assert result == {"settings": APPLIED, "saved": False}
         assert bridge.engine.settings.effect == Effect.PULSE
         assert bridge.latency_ms == 200
         assert bridge.night_light == 0.3
@@ -239,7 +271,7 @@ async def test_applied_settings_are_saved_as_addon_options(
             await client.close()
             await supervisor.close()
     assert result["saved"] is True
-    assert posted == [{"options": {**options, **GOOD, "sensitivity": 3.0}}]
+    assert posted == [{"options": {**options, **APPLIED}}]
 
 
 async def test_idle_preview_shows_the_night_light() -> None:

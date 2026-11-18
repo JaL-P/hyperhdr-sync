@@ -88,8 +88,30 @@ def test_options_parse_as_bridge_arguments() -> None:
     assert args.log_level == "INFO"
     assert args.color == (255, 147, 41)
     assert args.night_light == 0
+    assert args.colors == ()
+    assert args.steps is False
     assert args.token is None
     assert args.ui_supervisor, "the add-on always serves its Ingress panel"
+
+
+def test_own_palette_options_reach_the_bridge() -> None:
+    """The palette made in the web UI reaches the bridge; the saved palettes stay out of argv."""
+    run = _load("addon_run", ADDON / "run.py")
+    bridge = _load("hyperhdr_bridge", ROOT / "standalone" / "hyperhdr_bridge.py")
+    options = {
+        **_config()["options"],
+        "hyperhdr_host": "192.168.1.20",
+        "palette": "mine",
+        "colors": ["#ff0000", "#0000ff"],
+        "steps": True,
+        "my_palettes": [{"name": "Two", "colors": "#ff0000,#0000ff", "steps": True}],
+    }
+    argv = run.options_to_argv(options)
+    assert "Two" not in " ".join(argv)
+    args = bridge.parse_args(argv)
+    assert args.palette == "mine"
+    assert args.colors == ((255, 0, 0), (0, 0, 255))
+    assert args.steps is True
 
 
 def test_supervisor_token_is_read_from_the_s6_environment(

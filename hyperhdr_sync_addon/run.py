@@ -31,7 +31,10 @@ _FLAGS = {
     "color": "--color",
     "album_mode": "--album-mode",
     "night_light": "--night-light",
+    "colors": "--colors",
 }
+# add-on option -> bridge flag that is given without a value when the option is on
+_SWITCHES = {"steps": "--steps"}
 
 
 def options_to_argv(options: dict[str, Any]) -> list[str]:
@@ -45,9 +48,12 @@ def options_to_argv(options: dict[str, Any]) -> list[str]:
     argv = ["--state-dir", STATE_DIR]
     for key, flag in _FLAGS.items():
         value = options.get(key)
+        if isinstance(value, list):
+            value = ",".join(str(item).strip() for item in value)
         if value is None or (isinstance(value, str) and not value.strip()):
             continue
         argv += [flag, str(value).strip()]
+    argv += [flag for key, flag in _SWITCHES.items() if options.get(key) is True]
     argv += ["--log-level", str(options.get("log_level") or "info").upper()]
     # The add-on always runs under the Supervisor: serve the web UI as its Ingress panel.
     argv.append("--ui-supervisor")
