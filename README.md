@@ -72,6 +72,10 @@ Useful options (`--help` lists all):
 | `--response` | `snappy`, `balanced`, `smooth` |
 | `--latency-ms` | Render this far ahead of the music. Raise it if the lights lag |
 | `--hyperhdr-host`, `--udp-port`, `--web-port`, `--token` | Where HyperHDR is (default: this machine) |
+| `--ui-port` | Serve the web UI (live view, previews, Apply) on this port, e.g. `8080`, then open `http://127.0.0.1:8080`. Add `--ui-host 0.0.0.0` to reach it from other machines; it has no login |
+
+The Home Assistant add-on has the same web UI in the sidebar, where applied settings are also
+saved in the add-on's configuration.
 
 `aiosendspin` in `standalone/requirements.txt` should stay at the version your Music Assistant
 server uses.

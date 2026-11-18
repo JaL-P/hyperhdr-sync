@@ -116,6 +116,8 @@ _PALETTE_STOPS: dict[Palette, tuple[_RGB, ...]] = {
     Palette.FOREST: ((0, 255, 50), (170, 255, 0), (0, 170, 120)),
     Palette.NEON: ((255, 0, 200), (0, 220, 255), (140, 0, 255)),
 }
+# Album palette for artwork without colour: warm white through white to cool white.
+_MONOCHROME_STOPS: tuple[_RGB, ...] = ((255, 170, 90), (255, 255, 255), (160, 195, 255))
 
 
 @dataclass(frozen=True)
@@ -447,29 +449,60 @@ class Engine:
 
     # ---------------------------------------------------------------- palettes
 
+    @property
+    def album_colors(self) -> tuple[tuple[int, int, int], ...]:
+        """The artwork colours last given to :meth:`set_album_colors`."""
+        return self._album_colors
+
     def _rebuild_palette(self) -> None:
         """Rebuild both colour lookup tables for the selected palette."""
-        palette = self.settings.palette
-        stops: tuple[_RGB, ...] | None = None
-        if palette == Palette.ALBUM:
-            stops = _vivid_stops(self._album_colors)
-        elif palette in _PALETTE_STOPS:
-            stops = _PALETTE_STOPS[palette]
-        if stops:
-            colors = np.array(stops, np.float32) / 255.0
-            self._lut_linear = _gradient(colors, cyclic=False)
-            self._lut_cyclic = _gradient(colors, cyclic=True)
-            return
-        # Rainbow (also the fallback when the artwork has no usable colours). The
-        # linear table stops at violet so both ends of a bar are not the same red.
-        hues = np.arange(_LUT_SIZE) / _LUT_SIZE
-        self._lut_cyclic = np.array([colorsys.hsv_to_rgb(h, 1.0, 1.0) for h in hues], np.float32)
-        self._lut_linear = np.array(
-            [colorsys.hsv_to_rgb(h * 0.8, 1.0, 1.0) for h in hues], np.float32
+        self._lut_linear, self._lut_cyclic = _palette_luts(
+            self.settings.palette, self._album_colors
         )
 
 
+def palette_swatch(
+    palette: Palette, album_colors: Iterable[Sequence[int]] = (), count: int = 8
+) -> list[tuple[int, int, int]]:
+    """
+    Return colours spread across a palette's gradient, e.g. to show it in a user interface.
+
+    :param palette: The palette.
+    :param album_colors: Artwork colours, used by :attr:`Palette.ALBUM`.
+    :param count: How many colours to return.
+    """
+    cleaned = tuple((int(c[0]), int(c[1]), int(c[2])) for c in album_colors if len(c) >= 3)
+    linear, _ = _palette_luts(palette, cleaned)
+    at = np.linspace(0.0, 1.0, max(count, 2))
+    return [
+        (int(r * 255 + 0.5), int(g * 255 + 0.5), int(b * 255 + 0.5))
+        for r, g, b in _sample(linear, at).tolist()
+    ]
+
+
 # ------------------------------------------------------------------- helpers
+
+
+def _palette_luts(
+    palette: Palette, album_colors: tuple[_RGB, ...]
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return the (linear, cyclic) colour lookup tables of a palette."""
+    stops: tuple[_RGB, ...] | None = None
+    if palette == Palette.ALBUM:
+        # Black-and-white artwork has no colour to show: light it in shades of white
+        # rather than the rainbow, whose bass end would turn the LEDs red.
+        stops = _vivid_stops(album_colors) or (_MONOCHROME_STOPS if album_colors else None)
+    elif palette in _PALETTE_STOPS:
+        stops = _PALETTE_STOPS[palette]
+    if stops:
+        colors = np.array(stops, np.float32) / 255.0
+        return _gradient(colors, cyclic=False), _gradient(colors, cyclic=True)
+    # Rainbow (also the fallback when the artwork has no usable colours). The
+    # linear table stops at violet so both ends of a bar are not the same red.
+    hues = np.arange(_LUT_SIZE) / _LUT_SIZE
+    cyclic = np.array([colorsys.hsv_to_rgb(h, 1.0, 1.0) for h in hues], np.float32)
+    linear = np.array([colorsys.hsv_to_rgb(h * 0.8, 1.0, 1.0) for h in hues], np.float32)
+    return linear, cyclic
 
 
 def _alpha(dt: float, tau: float) -> float:

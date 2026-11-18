@@ -44,6 +44,9 @@ def options_to_argv(options: dict[str, Any]) -> list[str]:
             continue
         argv += [flag, str(value).strip()]
     argv += ["--log-level", str(options.get("log_level") or "info").upper()]
+    # The Supervisor gives every add-on a token; with it the web UI becomes the Ingress panel.
+    if os.environ.get("SUPERVISOR_TOKEN"):
+        argv.append("--ui-supervisor")
     return argv
 
 

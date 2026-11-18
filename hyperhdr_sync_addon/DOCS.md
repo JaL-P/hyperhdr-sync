@@ -11,6 +11,14 @@ seconds.
    **UDP raw receiver**. Keep port `5568`.
 2. Music Assistant 2.11 or later with Sendspin (it is on by default).
 
+## Web UI
+
+Open **HyperHDR Sync** in the sidebar (or **Open Web UI** on the add-on page). It shows what
+your LEDs show right now next to a preview. Pick an effect, colours, brightness and so on: the
+preview changes straight away, following the music that is playing or a built-in test beat, while
+your LEDs keep their current look. **Apply** puts the new settings on the LEDs and saves them in
+the add-on's configuration.
+
 ## Configuration
 
 - **HyperHDR address** (required): the IP address of the machine running HyperHDR.
@@ -19,7 +27,8 @@ seconds.
 - **API token**: only needed when HyperHDR is on a different subnet. Create one in HyperHDR under
   **Token Management**.
 - **Effect**, **Colours**, **Brightness**, **Sensitivity**, **Response**, **Latency**: how the
-  lights look. Restart the add-on after changing them.
+  lights look. The web UI changes them without a restart; after changing them here, restart the
+  add-on.
 
 Only run one bridge per set of LEDs. If you also started the standalone bridge on a PC, stop it.
 

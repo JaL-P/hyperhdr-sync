@@ -179,7 +179,7 @@ def test_loudness_only_stream_still_drives_the_lights() -> None:
 
 
 def test_album_colours_are_used_and_fall_back_to_rainbow() -> None:
-    """Artwork colours tint the LEDs; greys alone leave the rainbow in place."""
+    """Artwork colours tint the LEDs; without artwork the rainbow is used."""
     engine = Engine(_tv_layout(), EngineSettings(effect=Effect.PULSE, palette=Palette.ALBUM))
     engine.set_album_colors([(180, 10, 10)])
     frame = _settle(engine, [LOUD] * SPECTRUM_BINS, frames=40)
@@ -187,11 +187,22 @@ def test_album_colours_are_used_and_fall_back_to_rainbow() -> None:
     assert red > 2 * blue
     assert red > green
 
-    grey = Engine(_tv_layout(), EngineSettings(effect=Effect.SPECTRUM, palette=Palette.ALBUM))
-    grey.set_album_colors([(90, 90, 90), (10, 10, 10)])
-    frame = _settle(grey, [LOUD] * SPECTRUM_BINS, frames=40)
+    none = Engine(_tv_layout(), EngineSettings(effect=Effect.SPECTRUM, palette=Palette.ALBUM))
+    frame = _settle(none, [LOUD] * SPECTRUM_BINS, frames=40)
     channels = frame.astype(int).sum(axis=0)
     assert channels.min() > 0, "rainbow fallback uses all three channels"
+
+
+def test_black_and_white_artwork_gives_white_light() -> None:
+    """Greyscale artwork lights the LEDs in shades of white, never in rainbow red."""
+    bass = [LOUD] * 4 + [0] * (SPECTRUM_BINS - 4)
+    for effect in (Effect.SPECTRUM, Effect.PULSE, Effect.ENERGY):
+        engine = Engine(_tv_layout(), EngineSettings(effect=effect, palette=Palette.ALBUM))
+        engine.set_album_colors([(240, 240, 240), (90, 90, 90), (10, 10, 10)])
+        frame = _settle(engine, bass, frames=40).astype(int)
+        lit = frame[frame.max(axis=1) > 40]
+        assert len(lit), effect
+        assert (lit.min(axis=1) >= 0.3 * lit.max(axis=1)).all(), f"{effect} shows a strong tint"
 
 
 def test_changing_settings_keeps_the_music_state() -> None:

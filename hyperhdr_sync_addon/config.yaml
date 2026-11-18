@@ -1,5 +1,5 @@
 name: "HyperHDR Sync"
-version: "0.2.0"
+version: "0.3.0"
 slug: "hyperhdr_sync"
 description: "Makes your HyperHDR LEDs react to the music Music Assistant plays"
 url: "https://github.com/JaL-P/hyperhdr-sync"
@@ -13,6 +13,12 @@ boot: auto
 init: false
 # Reaches the Music Assistant add-on on 127.0.0.1 (it uses the host network too).
 host_network: true
+# Web UI with a live view and previews, in the sidebar. Port 0: the Supervisor picks a free
+# one, which matters on the host network; the bridge asks the Supervisor which.
+ingress: true
+ingress_port: 0
+panel_icon: "mdi:led-strip-variant"
+panel_title: "HyperHDR Sync"
 options:
   server: "ws://127.0.0.1:8927/sendspin"
   name: "HyperHDR LEDs"

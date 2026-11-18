@@ -88,10 +88,50 @@ class Bridge:
         self.latency_us = latency_ms * 1000
         self.client: SendspinClient | None = None
         self.streaming = False
+        # A second engine with settings that are being tried out in the web UI. It gets
+        # the same sound features as the real one, but its frames never reach the LEDs.
+        self.preview: Engine | None = None
+        # The frame most recently sent to HyperHDR, shown as "now" in the web UI.
+        self.last_rgb = engine.render_black()
         self._frames: deque[VisualizerFrame] = deque()
         self._beats: list[VisualizerFrame] = []
         self._colors: dict[str, tuple[int, int, int] | None] = {}
         self._stats = {"frames": 0, "beats": 0, "peak": 0}
+
+    @property
+    def latency_ms(self) -> int:
+        """How far ahead of the music the lights are rendered."""
+        return self.latency_us // 1000
+
+    def apply(self, settings: EngineSettings, latency_ms: int) -> None:
+        """
+        Switch the LEDs to new settings, keeping the audio state.
+
+        :param settings: The new rendering settings.
+        :param latency_ms: How far ahead of the music to render.
+        """
+        self.engine.update_settings(settings)
+        self.latency_us = latency_ms * 1000
+        LOGGER.info(
+            "Settings applied: %s, %s colours, brightness %d%%, sensitivity %+.0f dB, %s, %d ms",
+            settings.effect,
+            settings.palette,
+            round(settings.brightness * 100),
+            settings.sensitivity_db,
+            settings.response,
+            latency_ms,
+        )
+
+    def start_preview(self) -> Engine:
+        """Create the preview engine (if needed) with the current settings."""
+        if self.preview is None:
+            self.preview = Engine(self.engine.layout, self.engine.settings)
+            self.preview.set_album_colors(self.engine.album_colors)
+        return self.preview
+
+    def stop_preview(self) -> None:
+        """Drop the preview engine."""
+        self.preview = None
 
     # ---------------------------------------------------- Sendspin callbacks
 
@@ -103,6 +143,8 @@ class Bridge:
             LOGGER.info("Music started, driving the LEDs")
             self._frames.clear()
             self.engine.reset()
+            if self.preview is not None:
+                self.preview.reset()
         self.streaming = True
 
     def on_stream_end(self, roles: list[str] | None) -> None:
@@ -119,6 +161,8 @@ class Bridge:
             self._frames.clear()
             self._beats.clear()
             self.engine.reset()
+            if self.preview is not None:
+                self.preview.reset()
 
     def on_frames(self, frames: list[VisualizerFrame]) -> None:
         """Queue feature frames until their playback time."""
@@ -143,9 +187,10 @@ class Bridge:
                 self._colors[name] = None
             elif isinstance(value, (tuple, list)) and len(value) >= 3:
                 self._colors[name] = (int(value[0]), int(value[1]), int(value[2]))
-        self.engine.set_album_colors(
-            [c for name in COLOR_FIELDS if (c := self._colors.get(name)) is not None]
-        )
+        colors = [c for name in COLOR_FIELDS if (c := self._colors.get(name)) is not None]
+        self.engine.set_album_colors(colors)
+        if self.preview is not None:
+            self.preview.set_album_colors(colors)
 
     def stop_stream(self) -> None:
         """Stop rendering; the render loop then blacks the LEDs out."""
@@ -153,6 +198,8 @@ class Bridge:
         self._frames.clear()
         self._beats.clear()
         self.engine.reset()
+        if self.preview is not None:
+            self.preview.reset()
 
     # ----------------------------------------------------------- render loop
 
@@ -190,19 +237,23 @@ class Bridge:
     def _drain(self, playhead_us: int) -> None:
         """Feed the engine everything that is audible by now."""
         frames = self._frames
+        engines = [self.engine] if self.preview is None else [self.engine, self.preview]
         while frames and frames[0].timestamp_us <= playhead_us:
             frame = frames.popleft()
             self._stats["frames"] += 1
-            self.engine.feed(
-                loudness=frame.loudness, spectrum=frame.spectrum, onset=frame.peak_strength
-            )
+            for engine in engines:
+                engine.feed(
+                    loudness=frame.loudness, spectrum=frame.spectrum, onset=frame.peak_strength
+                )
         while self._beats and self._beats[0].timestamp_us <= playhead_us:
             beat = self._beats.pop(0)
             if playhead_us - beat.timestamp_us <= STALE_BEAT_US:
                 self._stats["beats"] += 1
-                self.engine.beat(1.0 if beat.is_downbeat else 0.8)
+                for engine in engines:
+                    engine.beat(1.0 if beat.is_downbeat else 0.8)
 
     def _send(self, rgb: bytes) -> None:
+        self.last_rgb = rgb
         with contextlib.suppress(OSError):
             self.sender.send(rgb)
 
@@ -316,27 +367,37 @@ async def demo_loop(bridge: Bridge) -> None:
         await asyncio.sleep(period)
         now = time.perf_counter()
         dt, last = now - last, now
-        t = now - start
-        beat_pos = t * 2.0  # two beats per second
-        kick = math.exp(-(beat_pos % 1.0) * 6.0)
-        hat = math.exp(-((beat_pos + 0.5) % 1.0) * 9.0)
-        sweep = 0.5 + 0.5 * math.sin(t * 0.7)
-        spectrum = []
-        for band in range(SPECTRUM_BINS):
-            x = band / (SPECTRUM_BINS - 1)
-            low = kick * math.exp(-(((x - 0.08) / 0.12) ** 2))
-            mid = (0.45 + 0.3 * math.sin(t * 1.9 + band)) * math.exp(
-                -(((x - sweep * 0.6 - 0.2) / 0.18) ** 2)
-            )
-            high = hat * math.exp(-(((x - 0.9) / 0.12) ** 2))
-            level = min(1.0, max(low, mid, high))
-            spectrum.append(int((0.35 + 0.5 * level) * 65535) if level > 0.02 else 9000)
-        onset = 200 if int(beat_pos) != last_beat else None
-        last_beat = int(beat_pos)
-        bridge.engine.feed(
-            loudness=int((0.55 + 0.3 * kick) * 65535), spectrum=spectrum, onset=onset
-        )
+        loudness, spectrum, beat = demo_features(now - start)
+        onset = 200 if beat != last_beat else None
+        last_beat = beat
+        # (the web UI feeds its preview the test beat itself while no music streams)
+        bridge.engine.feed(loudness=loudness, spectrum=spectrum, onset=onset)
         bridge._send(bridge.engine.render(dt))  # noqa: SLF001
+
+
+def demo_features(t: float) -> tuple[int, list[int], int]:
+    """
+    Return the sound features of a synthetic 120 BPM track at time ``t``.
+
+    :param t: Seconds since the track started.
+    :return: Loudness, spectrum (both on the visualizer's scale) and the number of
+        the current beat; a new number means a beat just started.
+    """
+    beat_pos = t * 2.0  # two beats per second
+    kick = math.exp(-(beat_pos % 1.0) * 6.0)
+    hat = math.exp(-((beat_pos + 0.5) % 1.0) * 9.0)
+    sweep = 0.5 + 0.5 * math.sin(t * 0.7)
+    spectrum = []
+    for band in range(SPECTRUM_BINS):
+        x = band / (SPECTRUM_BINS - 1)
+        low = kick * math.exp(-(((x - 0.08) / 0.12) ** 2))
+        mid = (0.45 + 0.3 * math.sin(t * 1.9 + band)) * math.exp(
+            -(((x - sweep * 0.6 - 0.2) / 0.18) ** 2)
+        )
+        high = hat * math.exp(-(((x - 0.9) / 0.12) ** 2))
+        level = min(1.0, max(low, mid, high))
+        spectrum.append(int((0.35 + 0.5 * level) * 65535) if level > 0.02 else 9000)
+    return int((0.55 + 0.3 * kick) * 65535), spectrum, int(beat_pos)
 
 
 async def load_layout(args: argparse.Namespace, session: aiohttp.ClientSession) -> LedLayout:
@@ -375,6 +436,22 @@ async def run(args: argparse.Namespace) -> None:
         if task is not None and hasattr(signal, "SIGTERM"):
             with contextlib.suppress(NotImplementedError):  # no signal handlers on Windows
                 asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
+        web_runner = None
+        if args.ui_port or args.ui_supervisor:
+            from web_ui import start_web_ui  # noqa: PLC0415
+
+            try:
+                web_runner = await start_web_ui(
+                    bridge,
+                    demo_features,
+                    session,
+                    host=args.ui_host,
+                    port=args.ui_port,
+                    supervisor=args.ui_supervisor,
+                )
+            except (OSError, aiohttp.ClientError, TimeoutError, KeyError, ValueError) as err:
+                # The LEDs matter more than the page: keep running without it.
+                LOGGER.warning("Web UI not started: %s", err)
         try:
             if args.demo:
                 await demo_loop(bridge)
@@ -386,6 +463,8 @@ async def run(args: argparse.Namespace) -> None:
                 bridge._send(bridge.engine.render_black())  # noqa: SLF001
                 await asyncio.sleep(0.05)
             sender.close()
+            if web_runner is not None:
+                await web_runner.cleanup()
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -430,6 +509,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--state-dir", default=str(DEFAULT_STATE_DIR), help="where the bridge keeps its identity"
+    )
+    parser.add_argument(
+        "--ui-port",
+        type=int,
+        default=0,
+        help="serve a web UI with a live view and previews on this port (0: off)",
+    )
+    parser.add_argument(
+        "--ui-host",
+        default="127.0.0.1",
+        help="address the web UI listens on; 0.0.0.0 opens it to the network (no login!)",
+    )
+    parser.add_argument(
+        "--ui-supervisor",
+        action="store_true",
+        help="serve the web UI as a Home Assistant add-on Ingress panel",
     )
     parser.add_argument(
         "--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"]

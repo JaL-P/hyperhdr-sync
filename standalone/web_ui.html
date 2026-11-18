@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HyperHDR Sync</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --card: #ffffff;
+    --text: #1c1d21;
+    --muted: #686c75;
+    --line: #e1e3e8;
+    --chip: #f0f1f4;
+    --chip-hover: #e6e8ec;
+    --accent: #0a84d6;
+    --accent-text: #ffffff;
+    --accent-soft: rgba(10, 132, 214, 0.12);
+    --good: #1f9d55;
+    --warn: #c47a00;
+    --bad: #d33a2c;
+    --wall: #0d0e12;
+    --shadow: 0 1px 2px rgba(16, 18, 24, 0.06), 0 4px 16px rgba(16, 18, 24, 0.05);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111214;
+      --card: #1b1c1f;
+      --text: #e9eaee;
+      --muted: #9a9ea8;
+      --line: #2c2e33;
+      --chip: #25272b;
+      --chip-hover: #2f3136;
+      --accent: #3aa7f0;
+      --accent-text: #06121b;
+      --accent-soft: rgba(58, 167, 240, 0.16);
+      --good: #4cc488;
+      --warn: #e6a23c;
+      --bad: #f06a5d;
+      --wall: #08090b;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.25);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111214; --card: #1b1c1f; --text: #e9eaee; --muted: #9a9ea8; --line: #2c2e33;
+    --chip: #25272b; --chip-hover: #2f3136; --accent: #3aa7f0; --accent-text: #06121b;
+    --accent-soft: rgba(58, 167, 240, 0.16); --good: #4cc488; --warn: #e6a23c; --bad: #f06a5d;
+    --wall: #08090b; --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.25);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 1180px; margin: 0 auto; padding: 20px 16px 104px; }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  header h1 { font-size: 20px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px 4px 9px;
+    border-radius: 999px; background: var(--chip); color: var(--muted); font-size: 12.5px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .pill.playing { color: var(--good); }
+  .pill.playing .dot { background: var(--good); box-shadow: 0 0 0 3px rgba(76, 196, 136, 0.2); }
+  .pill.offline { color: var(--bad); }
+  .pill.offline .dot { background: var(--bad); }
+  header .count { color: var(--muted); font-size: 12.5px; margin-left: auto; }
+
+  .stages { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: var(--shadow);
+  }
+  .stage { padding: 14px; }
+  .stage-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 2px 10px; }
+  .stage-head h2 { font-size: 14px; font-weight: 600; margin: 0; }
+  .stage-head span { color: var(--muted); font-size: 12.5px; text-align: right; }
+  .stage.preview { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow); }
+  .screen-wrap { position: relative; border-radius: 10px; overflow: hidden; background: var(--wall); }
+  canvas { display: block; width: 100%; aspect-ratio: 16 / 10; }
+  .overlay {
+    position: absolute; inset: 0; display: grid; place-items: center; padding: 16px;
+    color: rgba(255, 255, 255, 0.62); font-size: 13px; text-align: center; pointer-events: none;
+  }
+  .overlay[hidden] { display: none; }
+
+  .controls { margin-top: 16px; padding: 6px 18px; }
+  .group { padding: 14px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: 150px 1fr; gap: 12px; align-items: start; }
+  .group:first-child { border-top: 0; }
+  .group > .label { font-weight: 600; padding-top: 7px; }
+  .group > .label small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    appearance: none; border: 1px solid transparent; background: var(--chip); color: var(--text);
+    font: inherit; padding: 7px 13px; border-radius: 9px; cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+  }
+  .chip:hover { background: var(--chip-hover); }
+  .chip:focus-visible, .btn:focus-visible, input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .chip .applied-mark { display: none; }
+  .chip.applied:not([aria-pressed="true"]) { border-color: var(--line); }
+  .palette { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 112px; padding: 8px 10px; }
+  .swatch { height: 10px; border-radius: 5px; }
+  .slider { display: grid; grid-template-columns: 1fr 76px; gap: 14px; align-items: center; max-width: 560px; }
+  .slider output { font-variant-numeric: tabular-nums; text-align: right; color: var(--muted); }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+  .bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+    background: color-mix(in srgb, var(--card) 92%, transparent);
+    backdrop-filter: blur(10px); border-top: 1px solid var(--line);
+  }
+  .bar-inner { max-width: 1180px; margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; gap: 12px; }
+  .bar .status { flex: 1; color: var(--muted); min-width: 0; }
+  .bar .status.dirty { color: var(--text); font-weight: 550; }
+  .bar .status.ok { color: var(--good); }
+  .bar .status.err { color: var(--bad); }
+  .btn {
+    appearance: none; font: inherit; font-weight: 600; border-radius: 10px; padding: 9px 18px;
+    border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer;
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+
+  @media (max-width: 860px) {
+    .stages { grid-template-columns: 1fr; }
+    .group { grid-template-columns: 1fr; gap: 8px; }
+    .group > .label { padding-top: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>HyperHDR Sync</h1>
+    <span class="pill" id="status"><span class="dot"></span><span id="status-text">Connecting…</span></span>
+    <span class="count" id="count"></span>
+  </header>
+
+  <section class="stages">
+    <div class="card stage">
+      <div class="stage-head"><h2>On your LEDs now</h2><span id="live-note"></span></div>
+      <div class="screen-wrap">
+        <canvas id="live" aria-label="What the LEDs show now"></canvas>
+        <div class="overlay" id="live-overlay" hidden>Nothing is playing, so HyperHDR shows its own picture.</div>
+      </div>
+    </div>
+    <div class="card stage preview">
+      <div class="stage-head"><h2>Preview</h2><span id="preview-note"></span></div>
+      <div class="screen-wrap">
+        <canvas id="preview" aria-label="Preview of the selected settings"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <section class="card controls" id="controls" aria-label="Settings">
+    <div class="group">
+      <div class="label">Effect</div>
+      <div class="chips" id="effects" role="group" aria-label="Effect"></div>
+    </div>
+    <div class="group">
+      <div class="label">Colours<small>Album art follows the cover of the current track</small></div>
+      <div class="chips" id="palettes" role="group" aria-label="Colours"></div>
+    </div>
+    <div class="group">
+      <div class="label">Brightness</div>
+      <div><div class="slider"><input type="range" id="brightness" step="1"><output for="brightness" id="brightness-out"></output></div>
+      <div class="hint">On top of HyperHDR's own brightness.</div></div>
+    </div>
+    <div class="group">
+      <div class="label">Sensitivity</div>
+      <div><div class="slider"><input type="range" id="sensitivity" step="1"><output for="sensitivity" id="sensitivity-out"></output></div>
+      <div class="hint">Raise it if the lights look flat, lower it if they stay bright.</div></div>
+    </div>
+    <div class="group">
+      <div class="label">Response</div>
+      <div class="chips" id="responses" role="group" aria-label="Response"></div>
+    </div>
+    <div class="group">
+      <div class="label">Latency</div>
+      <div><div class="slider"><input type="range" id="latency_ms" step="10"><output for="latency_ms" id="latency_ms-out"></output></div>
+      <div class="hint">How far the lights run ahead of the music. Raise it if they lag. Not shown in the preview; it takes effect on Apply.</div></div>
+    </div>
+  </section>
+</div>
+
+<div class="bar">
+  <div class="bar-inner">
+    <div class="status" id="bar-status" role="status" aria-live="polite">Loading…</div>
+    <button class="btn" id="reset" type="button" disabled>Reset</button>
+    <button class="btn primary" id="apply" type="button" disabled>Apply</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+(() => {
+  const KEYS = ["effect", "palette", "brightness", "sensitivity", "response", "latency_ms"];
+  const $ = (id) => document.getElementById(id);
+  const ui = {
+    leds: null, applied: null, pending: null, palettes: [], playing: false, saves: false,
+    live: null, preview: null, connected: false, message: null,
+  };
+
+  // ------------------------------------------------------------ drawing
+
+  class Screen {
+    constructor(canvas) {
+      this.canvas = canvas;
+      this.ctx = canvas.getContext("2d");
+      this.points = [];
+      new ResizeObserver(() => this.resize()).observe(canvas);
+    }
+    resize() {
+      const ratio = window.devicePixelRatio || 1;
+      const { width, height } = this.canvas.getBoundingClientRect();
+      this.canvas.width = Math.max(1, Math.round(width * ratio));
+      this.canvas.height = Math.max(1, Math.round(height * ratio));
+      this.layout();
+    }
+    layout() {
+      if (!ui.leds) return;
+      const w = this.canvas.width, h = this.canvas.height;
+      // The screen sits in the middle of a dark wall, LEDs on its rim.
+      const tw = w * 0.62, th = tw * 9 / 16;
+      const tx = (w - tw) / 2, ty = (h - th) / 2;
+      this.tv = { x: tx, y: ty, w: tw, h: th };
+      this.glow = tw * 0.16;
+      this.dot = Math.max(1.5, tw * 0.0065);
+      this.points = ui.leds.x.map((x, i) => {
+        const y = ui.leds.y[i];
+        // Move each LED onto the nearest edge of the screen.
+        const d = { left: x, right: 1 - x, top: y, bottom: 1 - y };
+        const edge = Object.keys(d).reduce((a, b) => (d[a] <= d[b] ? a : b));
+        let px = tx + x * tw, py = ty + y * th;
+        if (edge === "left") px = tx; else if (edge === "right") px = tx + tw;
+        else if (edge === "top") py = ty; else py = ty + th;
+        const nx = edge === "left" ? -1 : edge === "right" ? 1 : 0;
+        const ny = edge === "top" ? -1 : edge === "bottom" ? 1 : 0;
+        return { px, py, gx: px + nx * this.glow * 0.45, gy: py + ny * this.glow * 0.45 };
+      });
+    }
+    draw(rgb) {
+      const { ctx, canvas, tv } = this;
+      if (!tv) return;
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = "#0b0c0f";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (rgb) {
+        ctx.globalCompositeOperation = "lighter";
+        for (let i = 0; i < this.points.length; i++) {
+          const r = rgb[i * 3], g = rgb[i * 3 + 1], b = rgb[i * 3 + 2];
+          if (r + g + b < 6) continue;
+          const p = this.points[i];
+          const grad = ctx.createRadialGradient(p.gx, p.gy, 0, p.gx, p.gy, this.glow);
+          grad.addColorStop(0, `rgba(${r},${g},${b},0.55)`);
+          grad.addColorStop(0.45, `rgba(${r},${g},${b},0.16)`);
+          grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+          ctx.fillStyle = grad;
+          ctx.fillRect(p.gx - this.glow, p.gy - this.glow, this.glow * 2, this.glow * 2);
+        }
+      }
+      ctx.globalCompositeOperation = "source-over";
+      const radius = tv.w * 0.012;
+      ctx.fillStyle = "#040405";
+      ctx.strokeStyle = "rgba(255,255,255,0.10)";
+      ctx.lineWidth = Math.max(1, tv.w * 0.003);
+      ctx.beginPath();
+      ctx.roundRect(tv.x, tv.y, tv.w, tv.h, radius);
+      ctx.fill();
+      ctx.stroke();
+      for (let i = 0; i < this.points.length; i++) {
+        const p = this.points[i];
+        const r = rgb ? rgb[i * 3] : 0, g = rgb ? rgb[i * 3 + 1] : 0, b = rgb ? rgb[i * 3 + 2] : 0;
+        ctx.fillStyle = r + g + b < 6 ? "rgba(255,255,255,0.13)" : `rgb(${r},${g},${b})`;
+        ctx.beginPath();
+        ctx.arc(p.px, p.py, this.dot, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  const screens = { live: new Screen($("live")), preview: new Screen($("preview")) };
+  function frameLoop() {
+    screens.live.draw(ui.live);
+    screens.preview.draw(ui.preview);
+    requestAnimationFrame(frameLoop);
+  }
+
+  // ----------------------------------------------------------- controls
+
+  function chipGroup(container, items, key, render) {
+    container.replaceChildren();
+    for (const item of items) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "chip";
+      button.dataset.value = item.id;
+      render(button, item);
+      button.addEventListener("click", () => setPending(key, item.id));
+      container.append(button);
+    }
+  }
+  function renderPalette(button, item) {
+    button.classList.add("palette");
+    const bar = document.createElement("span");
+    bar.className = "swatch";
+    bar.style.background = `linear-gradient(90deg, ${item.colors.join(", ")})`;
+    const label = document.createElement("span");
+    label.textContent = item.label;
+    button.append(bar, label);
+  }
+  function updatePalettes(palettes) {
+    ui.palettes = palettes;
+    for (const button of $("palettes").children) {
+      const item = palettes.find((p) => p.id === button.dataset.value);
+      if (item) button.querySelector(".swatch").style.background = `linear-gradient(90deg, ${item.colors.join(", ")})`;
+    }
+  }
+  function formatValue(key, value) {
+    if (key === "brightness") return `${value}%`;
+    if (key === "sensitivity") return `${value > 0 ? "+" : ""}${value} dB`;
+    return `${value} ms`;
+  }
+  function setupSlider(key, range) {
+    const input = $(key);
+    input.min = range[0];
+    input.max = range[1];
+    input.addEventListener("input", () => setPending(key, Number(input.value)));
+  }
+
+  function render() {
+    const p = ui.pending, a = ui.applied;
+    for (const [id, key] of [["effects", "effect"], ["palettes", "palette"], ["responses", "response"]]) {
+      for (const button of $(id).children) {
+        button.setAttribute("aria-pressed", String(button.dataset.value === p[key]));
+        button.classList.toggle("applied", button.dataset.value === a[key]);
+        button.title = button.dataset.value === a[key] ? "On the LEDs now" : "";
+      }
+    }
+    for (const key of ["brightness", "sensitivity", "latency_ms"]) {
+      $(key).value = p[key];
+      $(`${key}-out`).value = formatValue(key, p[key]);
+    }
+    const changed = KEYS.filter((k) => p[k] !== a[k]);
+    $("apply").disabled = !changed.length || !ui.connected;
+    $("reset").disabled = !changed.length;
+    const status = $("bar-status");
+    status.className = "status";
+    if (ui.message) {
+      status.textContent = ui.message.text;
+      status.classList.add(ui.message.kind);
+    } else if (changed.length) {
+      status.textContent = changed.length === 1 ? "1 change, shown in the preview" : `${changed.length} changes, shown in the preview`;
+      status.classList.add("dirty");
+    } else {
+      status.textContent = "The preview matches your LEDs. Pick something to try it out.";
+    }
+    $("preview-note").textContent = ui.playing ? "Following the music" : "Playing a test beat";
+    $("live-note").textContent = ui.playing ? "Live" : "Idle";
+    if (ui.playing) $("live-overlay").hidden = true;
+    const pill = $("status");
+    pill.className = "pill" + (!ui.connected ? " offline" : ui.playing ? " playing" : "");
+    $("status-text").textContent = !ui.connected ? "Reconnecting…" : ui.playing ? "Music playing" : "No music playing";
+  }
+
+  function setPending(key, value) {
+    ui.pending = { ...ui.pending, [key]: value };
+    ui.message = null;
+    sendPreview();
+    render();
+  }
+
+  // -------------------------------------------------------------- server
+
+  let socket = null, retry = 500;
+  function sendPreview() {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "preview", settings: ui.pending }));
+    }
+  }
+  function connect() {
+    const url = new URL("api/ws", window.location.href);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    socket = new WebSocket(url);
+    socket.binaryType = "arraybuffer";
+    socket.onopen = () => {
+      ui.connected = true;
+      retry = 500;
+      sendPreview();
+      render();
+    };
+    socket.onmessage = (event) => {
+      if (typeof event.data === "string") {
+        const data = JSON.parse(event.data);
+        if (data.type === "status") {
+          ui.playing = data.playing;
+          if (data.palettes) updatePalettes(data.palettes);
+          render();
+        } else if (data.type === "error") {
+          ui.message = { kind: "err", text: data.message };
+          render();
+        }
+        return;
+      }
+      const bytes = new Uint8Array(event.data);
+      const n = ui.leds.x.length * 3;
+      ui.live = bytes.subarray(0, n);
+      ui.preview = bytes.subarray(n, n * 2);
+      // The note about HyperHDR's own picture only belongs over dark LEDs.
+      $("live-overlay").hidden = ui.playing || ui.live.some((v) => v > 3);
+    };
+    socket.onclose = () => {
+      ui.connected = false;
+      render();
+      setTimeout(connect, retry);
+      retry = Math.min(retry * 2, 8000);
+    };
+  }
+
+  async function apply() {
+    $("apply").disabled = true;
+    try {
+      const response = await fetch("api/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ui.pending),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || response.statusText);
+      ui.applied = data.settings;
+      ui.pending = { ...data.settings };
+      ui.message = data.error
+        ? { kind: "err", text: data.error }
+        : { kind: "ok", text: data.saved ? "Applied to the LEDs and saved." : "Applied to the LEDs until the bridge restarts." };
+    } catch (err) {
+      ui.message = { kind: "err", text: `Could not apply: ${err.message}` };
+    }
+    render();
+  }
+
+  async function start() {
+    let state;
+    try {
+      const response = await fetch("api/state");
+      state = await response.json();
+    } catch (err) {
+      $("bar-status").textContent = `Cannot reach the bridge: ${err.message}`;
+      setTimeout(start, 3000);
+      return;
+    }
+    ui.leds = state.leds;
+    ui.applied = state.settings;
+    ui.pending = { ...state.settings };
+    ui.playing = state.playing;
+    ui.saves = state.saves;
+    $("count").textContent = `${state.leds.x.length} LEDs`;
+    chipGroup($("effects"), state.effects, "effect", (b, item) => { b.textContent = item.label; });
+    chipGroup($("palettes"), state.palettes, "palette", renderPalette);
+    chipGroup($("responses"), state.responses, "response", (b, item) => { b.textContent = item.label; });
+    for (const key of ["brightness", "sensitivity", "latency_ms"]) setupSlider(key, state.ranges[key]);
+    $("apply").addEventListener("click", apply);
+    $("reset").addEventListener("click", () => {
+      ui.pending = { ...ui.applied };
+      ui.message = null;
+      sendPreview();
+      render();
+    });
+    screens.live.resize();
+    screens.preview.resize();
+    render();
+    connect();
+    requestAnimationFrame(frameLoop);
+  }
+  start();
+})();
+</script>
+</body>
+</html>
