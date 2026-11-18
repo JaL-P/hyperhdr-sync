@@ -170,6 +170,13 @@ DEFAULT_COLOR: tuple[int, int, int] = (255, 147, 41)
 
 # Frequency bands (blocks) of the Retro equaliser; the spectrum bins are grouped into them.
 _RETRO_BANDS: int = 8
+# First spectrum bin of each Retro band.
+_RETRO_BIN_STARTS: np.ndarray = (np.arange(_RETRO_BANDS) * SPECTRUM_BINS // _RETRO_BANDS).astype(
+    np.intp
+)
+# Fewest LEDs per Retro block that can show a growing bar with a gap and a peak dot;
+# smaller blocks show their band by brightness instead.
+_RETRO_MIN_BAR_LEDS: float = 4.0
 # Album palette for artwork without colour: warm white through white to cool white.
 _MONOCHROME_STOPS: tuple[_RGB, ...] = ((255, 170, 90), (255, 255, 255), (160, 195, 255))
 
@@ -234,8 +241,9 @@ class Engine:
         self._rng = np.random.default_rng(7)
         retro_at = self._ring * _RETRO_BANDS
         self._retro_block = np.minimum(retro_at.astype(np.intp), _RETRO_BANDS - 1)
-        self._retro_within = (retro_at - self._retro_block).astype(np.float32)
-        self._retro_leds = max(count / _RETRO_BANDS, 1.0)
+        # 0 in the middle of a Retro block, 1 at its ends.
+        self._retro_offset = (np.abs(retro_at - self._retro_block - 0.5) * 2.0).astype(np.float32)
+        self._retro_leds = count / _RETRO_BANDS
         self._album_colors: tuple[_RGB, ...] = ()
         self._lut_linear = np.zeros((_LUT_SIZE, 3), np.float32)
         self._lut_cyclic = np.zeros((_LUT_SIZE, 3), np.float32)
@@ -489,8 +497,12 @@ class Engine:
 
     def _fx_spectrum(self) -> np.ndarray:
         """Bass at the bottom of both sides rising to treble at top-centre."""
-        value = self._bands[self._band_lo] * (1.0 - self._band_frac)
-        value += self._bands[self._band_hi] * self._band_frac
+        if self._has_spectrum:
+            value = self._bands[self._band_lo] * (1.0 - self._band_frac)
+            value += self._bands[self._band_hi] * self._band_frac
+        else:
+            # Loudness-only stream: the whole spectrum follows the overall level.
+            value = np.full(self.layout.count, self._level, np.float32)
         value = value**_CONTRAST * (0.85 + 0.15 * self._pulse)
         frame: np.ndarray = _sample(self._lut_linear, self._pos) * value[:, None]
         return frame
@@ -558,7 +570,11 @@ class Engine:
         return frame
 
     def _fx_ambient(self, dt: float) -> np.ndarray:
-        """Calm colours turning around the screen; the music sets their speed, not brightness."""
+        """
+        Calm colours turning around the screen; the music sets their speed, not brightness.
+
+        :param dt: Seconds since the previous frame.
+        """
         self._ambient_phase = (self._ambient_phase + dt * (0.01 + 0.15 * self._level_slow)) % 1.0
         frame: np.ndarray = _sample_wrap(self._lut_cyclic, self._ring * 0.5 + self._ambient_phase)
         return frame * 0.55
@@ -580,6 +596,9 @@ class Engine:
             centroid = float((weights * np.linspace(0.0, 1.0, SPECTRUM_BINS)).sum()) / total
             target = min(1.0, max(0.0, (centroid - 0.12) / 0.55))
             self._colora += (target - self._colora) * _alpha(dt, 0.25)
+        elif not self._has_spectrum:
+            # Loudness-only stream: no pitch to follow, so the colour follows the loudness.
+            self._colora += (self._level - self._colora) * _alpha(dt, 0.25)
         at = np.clip(self._colora + (self._ring - 0.5) * 0.12, 0.0, 1.0)
         # Steady brightness: only the colour moves (brightness is what Lumina follows).
         frame: np.ndarray = _sample(self._lut_linear, at) * 0.85
@@ -590,23 +609,35 @@ class Engine:
         Graphic equaliser: eight frequency bands, each a block that lights from its middle.
 
         The blocks run around the screen from bass to treble; each has a peak dot that
-        falls back slowly, and dark gaps keep the blocks apart.
+        falls back slowly, and dark gaps keep the blocks apart. Blocks too short for a bar
+        show their band by brightness instead.
+
+        :param dt: Seconds since the previous frame.
         """
-        levels = self._bands.reshape(_RETRO_BANDS, -1).max(axis=1)
+        if self._has_spectrum:
+            levels = np.maximum.reduceat(self._bands, _RETRO_BIN_STARTS)
+        else:
+            # Loudness-only stream: every block shows the overall level.
+            levels = np.full(_RETRO_BANDS, self._level, np.float32)
         rising = levels > self._retro
         self._retro += (levels - self._retro) * np.where(
             rising, _alpha(dt, _ATTACK_TAU_S), _alpha(dt, 0.12)
         )
         self._retro_peak = np.maximum(self._retro, self._retro_peak - 0.5 * dt)
         block = self._retro_block
-        offset = np.abs(self._retro_within - 0.5) * 2.0  # 0 in a block's middle, 1 at its ends
-        reach = 0.85  # the outer 15% of every block stays dark as a gap
-        lit = offset < self._retro[block] * reach
         colors = _sample(self._lut_linear, block / (_RETRO_BANDS - 1.0))
+        if self._retro_leds < _RETRO_MIN_BAR_LEDS:
+            short: np.ndarray = colors * self._retro[block][:, None]
+            return short
+        # Half an LED, measured in block offsets (a block's half spans ``_retro_leds / 2``).
+        half_led = 1.0 / self._retro_leds
+        reach = min(0.85, 1.0 - half_led)  # the outermost LED of every block stays dark
+        offset = self._retro_offset
+        lit = offset < self._retro[block] * reach
         frame: np.ndarray = colors * lit[:, None]
         peak_at = self._retro_peak[block] * reach
-        dot = (np.abs(offset - peak_at) < 1.2 / self._retro_leds) & (self._retro_peak[block] > 0.05)
-        frame[dot] = 0.85
+        dot = (np.abs(offset - peak_at) < half_led) & (offset < reach)
+        frame[dot & (self._retro_peak[block] > 0.05)] = 0.85
         return frame
 
     def _fx_scanner(self, dt: float) -> np.ndarray:

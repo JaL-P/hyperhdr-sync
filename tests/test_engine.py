@@ -187,7 +187,7 @@ def test_loudness_only_stream_still_drives_the_lights() -> None:
 
 def test_album_colours_are_used_and_fall_back_to_rainbow() -> None:
     """Artwork colours tint the LEDs; without artwork the rainbow is used."""
-    engine = Engine(_tv_layout(), EngineSettings(effect=Effect.PULSE, palette=Palette.ALBUM))
+    engine = Engine(_tv_layout(), EngineSettings(effect=Effect.LUMINA, palette=Palette.ALBUM))
     engine.set_album_colors([(180, 10, 10)])
     frame = _settle(engine, [LOUD] * SPECTRUM_BINS, frames=40)
     red, green, blue = frame.astype(int).sum(axis=0)
@@ -367,3 +367,36 @@ def test_no_two_effects_do_the_same_thing() -> None:
         worst.append((round(score, 2), a.value, b.value))
     worst.sort(reverse=True)
     assert worst[0][0] < 0.7, f"effects too alike: {worst[:3]}"
+
+
+@pytest.mark.parametrize("count", [8, 16, 24, 60, 120])
+def test_retro_keeps_its_colours_on_short_strips(count: int) -> None:
+    """Retro's peak dots never cover a strip: most lit LEDs keep their band colour."""
+    engine = Engine(LedLayout.strip(count), EngineSettings(effect=Effect.RETRO))
+    frame = _settle(engine, [LOUD] * SPECTRUM_BINS, frames=60).astype(int)
+    lit = frame[frame.max(axis=1) > 40]
+    white = lit.min(axis=1) > 150
+    assert len(lit) >= count // 4
+    assert white.sum() <= len(lit) // 2, f"{white.sum()} of {len(lit)} lit LEDs are white"
+
+
+def _play_loudness(effect: Effect, *, kicks: bool) -> np.ndarray:
+    """Play 6 s of loudness without spectrum, steady or with kicks; return the frames."""
+    engine = Engine(_tv_layout(), EngineSettings(effect=effect, palette=Palette.RAINBOW))
+    frames = []
+    for i in range(int(6 / DT)):
+        t = i * DT
+        kick = math.exp(-((t * 2.0) % 1.0) * 7.0) if kicks else 0.5
+        level = 0.3 if kicks and 3.0 <= t < 4.0 else 1.0
+        frame = _frame(engine, None, loudness=int((0.45 + 0.4 * kick * level) * 65535))
+        frames.append(frame.astype(float) / 255.0)
+    return np.array(frames[40:])  # (time, LED, colour), after settling
+
+
+@pytest.mark.parametrize("effect", [effect for effect in Effect if effect != Effect.MANUAL])
+def test_every_effect_follows_a_loudness_only_stream(effect: Effect) -> None:
+    """Without spectrum data every effect still lights up and shows how the music goes."""
+    steady = _play_loudness(effect, kicks=False)
+    kicking = _play_loudness(effect, kicks=True)
+    assert kicking.max() > 0.25, "dark without spectrum data"
+    assert np.abs(kicking - steady).mean() > 0.05, "the same light whatever the music does"

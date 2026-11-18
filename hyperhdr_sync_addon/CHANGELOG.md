@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.4
+
+- Retro keeps its colours on short strips: blocks of fewer than four LEDs show their band by
+  brightness, and the peak dots and gaps take one LED each instead of covering whole blocks.
+- Retro, Colora and Spectrum follow the music on streams that send only the loudness: Retro
+  and Spectrum rise with the level (they were dark), and Colora's colour follows the loudness
+  (it was a fixed light).
+
 ## 0.3.3
 
 - Every effect now does something of its own; four overlapped with others:
