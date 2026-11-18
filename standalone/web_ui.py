@@ -462,7 +462,10 @@ def _is_local_host(host: str) -> bool:
 
 
 def _supervisor_headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {os.environ['SUPERVISOR_TOKEN']}"}
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        raise ValueError("SUPERVISOR_TOKEN is not set, so the Supervisor cannot be asked")
+    return {"Authorization": f"Bearer {token}"}
 
 
 async def supervisor_info(session: aiohttp.ClientSession) -> dict[str, Any]:

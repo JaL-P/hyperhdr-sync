@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
@@ -12,6 +13,7 @@ OPTIONS_FILE = Path("/data/options.json")
 # /data survives add-on updates, so the bridge keeps its identity and its group in Music Assistant.
 STATE_DIR = "/data/bridge"
 BRIDGE_DIR = Path(__file__).resolve().parent / "standalone"
+CONTAINER_ENV_DIR = Path("/run/s6/container_environment")
 
 # add-on option -> bridge command line flag
 _FLAGS = {
@@ -47,14 +49,32 @@ def options_to_argv(options: dict[str, Any]) -> list[str]:
             continue
         argv += [flag, str(value).strip()]
     argv += ["--log-level", str(options.get("log_level") or "info").upper()]
-    # The Supervisor gives every add-on a token; with it the web UI becomes the Ingress panel.
-    if os.environ.get("SUPERVISOR_TOKEN"):
-        argv.append("--ui-supervisor")
+    # The add-on always runs under the Supervisor: serve the web UI as its Ingress panel.
+    argv.append("--ui-supervisor")
     return argv
+
+
+def load_container_environment(env_dir: Path = CONTAINER_ENV_DIR) -> None:
+    """
+    Take over container variables such as ``SUPERVISOR_TOKEN`` that S6 overlay withheld.
+
+    The base image's S6 overlay starts the bridge with a cleaned environment and keeps
+    the container's variables as one file each; without the token the bridge cannot
+    ask the Supervisor where to serve the web UI.
+
+    :param env_dir: Folder with one file per variable.
+    """
+    for name in ("SUPERVISOR_TOKEN",):
+        if os.environ.get(name):
+            continue
+        with contextlib.suppress(OSError):
+            if value := (env_dir / name).read_text(encoding="utf-8").strip():
+                os.environ[name] = value
 
 
 def main() -> None:
     """Start the bridge with the add-on options."""
+    load_container_environment()
     options = json.loads(OPTIONS_FILE.read_text(encoding="utf-8"))
     if not str(options.get("hyperhdr_host") or "").strip():
         sys.exit("Set 'hyperhdr_host' in the add-on configuration to the machine HyperHDR runs on.")

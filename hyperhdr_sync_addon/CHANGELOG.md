@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+
+- Fix the web UI panel never starting ("The app seems to not be ready"): the add-on did
+  not get its Supervisor token, so the panel was never switched on.
+
 ## 0.3.0
 
 - Web UI in the sidebar: see what the LEDs show, preview other settings against the music or a

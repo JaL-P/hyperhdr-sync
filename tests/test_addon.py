@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
 import sys
 from pathlib import Path
@@ -88,3 +89,21 @@ def test_options_parse_as_bridge_arguments() -> None:
     assert args.color == (255, 147, 41)
     assert args.night_light == 0
     assert args.token is None
+    assert args.ui_supervisor, "the add-on always serves its Ingress panel"
+
+
+def test_supervisor_token_is_read_from_the_s6_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S6 overlay withholds container variables; the launcher reads the token from its file."""
+    run = _load("addon_run", ADDON / "run.py")
+    (tmp_path / "SUPERVISOR_TOKEN").write_text("abc123\n", encoding="utf-8")
+    monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
+    run.load_container_environment(tmp_path)
+    assert os.environ["SUPERVISOR_TOKEN"] == "abc123"  # noqa: S105 - test value
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "from-env")
+    run.load_container_environment(tmp_path)
+    assert os.environ["SUPERVISOR_TOKEN"] == "from-env"  # noqa: S105 - test value
+    monkeypatch.delenv("SUPERVISOR_TOKEN")
+    run.load_container_environment(tmp_path / "missing")
+    assert "SUPERVISOR_TOKEN" not in os.environ

@@ -474,7 +474,9 @@ async def run(args: argparse.Namespace) -> None:
                 )
             except (OSError, aiohttp.ClientError, TimeoutError, KeyError, ValueError) as err:
                 # The LEDs matter more than the page: keep running without it.
-                LOGGER.warning("Web UI not started: %s", err)
+                LOGGER.warning("Web UI not started: %s", err or type(err).__name__)
+        else:
+            LOGGER.info("Web UI off (start with --ui-port to use it)")
         try:
             if args.demo:
                 await demo_loop(bridge)
