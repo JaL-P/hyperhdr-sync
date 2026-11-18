@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -160,6 +161,28 @@ async def test_only_the_allowed_client_gets_in() -> None:
     try:
         assert (await client.get("/api/state")).status == 403
         assert (await client.post("/api/apply", json=GOOD)).status == 403
+    finally:
+        await client.close()
+
+
+async def test_other_sites_cannot_drive_the_page() -> None:
+    """Cross-site requests, DNS-rebinding host names and non-JSON posts are refused."""
+    bridge = _bridge()
+    client = await _client(web_ui.WebUi(bridge, bridge_module.demo_features))
+    try:
+        evil = {"Origin": "http://evil.example"}
+        assert (await client.post("/api/apply", json=GOOD, headers=evil)).status == 403
+        assert (await client.get("/api/ws", headers=evil)).status == 403
+        rebound = {"Host": "evil.example:8765"}
+        assert (await client.get("/api/state", headers=rebound)).status == 403
+        plain = await client.post(
+            "/api/apply", data=json.dumps(GOOD), headers={"Content-Type": "text/plain"}
+        )
+        assert plain.status == 415
+        assert bridge.engine.settings.effect == Effect.SPECTRUM
+        same = {"Origin": str(client.make_url("")).rstrip("/")}
+        assert (await client.post("/api/apply", json=GOOD, headers=same)).status == 200
+        assert (await client.get("/api/state", headers={"Host": "localhost:8765"})).status == 200
     finally:
         await client.close()
 

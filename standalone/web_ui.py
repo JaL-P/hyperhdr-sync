@@ -19,9 +19,11 @@ import ipaddress
 import json
 import logging
 import os
+import socket
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 import aiohttp
 from aiohttp import web
@@ -170,10 +172,27 @@ class WebUi:
     async def _guard(
         self, request: web.Request, handler: Callable[[web.Request], Awaitable[web.StreamResponse]]
     ) -> web.StreamResponse:
-        """Refuse every client but the allowed one (the Supervisor's Ingress proxy)."""
-        if self._allowed_remote is not None and request.remote != self._allowed_remote:
-            LOGGER.warning("Refused web UI request from %s", request.remote)
-            raise web.HTTPForbidden
+        """
+        Refuse requests that may come from another web site.
+
+        Behind Ingress only the Supervisor may connect (Home Assistant does the login).
+        Standalone, the page has no login, so other sites open in the same browser must
+        not drive it: the Host must be an address or this machine's name (no DNS
+        rebinding), a cross-site Origin is refused (also for the websocket), and Apply
+        only takes JSON, which a plain cross-site form cannot send.
+        """
+        if self._allowed_remote is not None:
+            if request.remote != self._allowed_remote:
+                LOGGER.warning("Refused web UI request from %s", request.remote)
+                raise web.HTTPForbidden
+            return await handler(request)
+        if not _is_local_host(request.host):
+            raise web.HTTPForbidden(text="Unknown host name")
+        origin = request.headers.get("Origin")
+        if origin is not None and urlsplit(origin).netloc.lower() != request.host.lower():
+            raise web.HTTPForbidden(text="Cross-site request")
+        if request.method == "POST" and request.content_type != "application/json":
+            raise web.HTTPUnsupportedMediaType(text="Send JSON")
         return await handler(request)
 
     async def _index(self, _request: web.Request) -> web.StreamResponse:
@@ -316,6 +335,20 @@ class WebUi:
                 for palette, label in PALETTE_LABELS.items()
             ]
         return self._swatches
+
+
+def _is_local_host(host: str) -> bool:
+    """
+    Whether a Host header names this machine: an IP address, localhost or its own name.
+
+    :param host: The Host header, optionally with a port.
+    """
+    name = urlsplit(f"//{host}").hostname or ""
+    with contextlib.suppress(ValueError):
+        ipaddress.ip_address(name)
+        return True
+    own = socket.gethostname().lower().split(".")[0]
+    return name in {"localhost", own, f"{own}.local"} or name.endswith(".localhost")
 
 
 # ------------------------------------------------------------------ Supervisor
