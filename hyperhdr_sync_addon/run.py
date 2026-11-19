@@ -34,6 +34,7 @@ _FLAGS = {
     "colors": "--colors",
     "ma_url": "--ma-url",
     "milkdrop_player": "--milkdrop-player",
+    "milkdrop_preset": "--milkdrop-preset",
 }
 # add-on option -> bridge flag that is given without a value when the option is on
 _SWITCHES = {"steps": "--steps"}

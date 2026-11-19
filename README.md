@@ -75,7 +75,8 @@ Useful options (`--help` lists all):
 | `--response` | `snappy`, `balanced`, `smooth` |
 | `--latency-ms` | Render this far ahead of the music. Raise it if the lights lag |
 | `--hyperhdr-host`, `--udp-port`, `--web-port`, `--token` | Where HyperHDR is (default: this machine) |
-| `--ma-token` (or `MA_TOKEN`), `--ma-url`, `--milkdrop-player` | Let Liquid draw the real sound wave from Music Assistant's MilkDrop Visualizer plugin (see below) |
+| `--milkdrop-preset`, `--chromium` | The MilkDrop effect's preset (default: a random one every 30 s) and the Chromium that draws it (see below) |
+| `--ma-token` (or `MA_TOKEN`), `--ma-url`, `--milkdrop-player` | Give Liquid and the MilkDrop presets the real sound wave from Music Assistant's MilkDrop Visualizer plugin (see below) |
 | `--ui-port` | Serve the web UI (live view, previews, Apply) on this port, e.g. `8080`, then open `http://127.0.0.1:8080`. Add `--ui-host 0.0.0.0` to reach it from other machines; it has no login |
 
 The Home Assistant add-on has the same web UI in the sidebar, where applied settings are also
@@ -137,12 +138,37 @@ off while Music Assistant starts, and re-reads the layout when music starts.
 | Horizon | A sun at the top pulsing with the bass, grid lines rushing down the sides. Inspired by Paraline |
 | Side bars | Bars growing from the middle of each side: bass left, treble right. Inspired by Paraline |
 | Liquid | Swirling trails that zoom, twist and fade into themselves. In the style of MilkDrop; draws the real sound wave with the MilkDrop plugin (below) |
+| MilkDrop | The real MilkDrop presets, as in Music Assistant's visualizer, seen by the LEDs like a screen grabber (below) |
 
-### The real sound wave for Liquid
+### The real MilkDrop presets
+
+The **MilkDrop** effect shows the same presets as Music Assistant's MilkDrop visualizer, as if
+HyperHDR were grabbing a screen showing it: each LED takes the colour at its edge of the
+picture. Music Assistant draws those pictures in your browser, so the bridge draws its own:
+it runs [Butterchurn](https://github.com/jberg/butterchurn) (MilkDrop in WebGL) with the
+[butterchurn-presets](https://www.npmjs.com/package/butterchurn-presets) in a headless
+Chromium, on a small 128x72 picture, only while MilkDrop is in use. Pick a preset in the web
+UI, or keep "Random" for a new one every 30 seconds.
+
+- **Colours > MilkDrop** keeps each preset's own colours. **Album cover**, a **Palette** or
+  **Your colour** tint the picture like Music Assistant's visualizer does: the picture keeps
+  its brightness and takes its colour from them.
+- With another effect, **Colours > MilkDrop** gives it the colours round the edges of the live
+  MilkDrop picture, so they change with it.
+- With the Music Assistant token below, the presets dance to the real sound wave; without it,
+  to a wave made from the spectrum Sendspin sends.
+
+The add-on includes Chromium and Butterchurn. For the standalone bridge, install Chromium
+(or give `--chromium`) and run `python standalone/fetch_butterchurn.py` once: it downloads the
+pinned Butterchurn releases from npm and checks them against their published checksums.
+Without them, MilkDrop shows Liquid instead.
+
+### The real sound wave for MilkDrop and Liquid
 
 Music Assistant's **MilkDrop Visualizer** plugin streams the sound wave of what a player plays
 (small 8-bit snapshots, about 43 a second, taken from the audio Music Assistant decodes anyway).
-With it, Liquid draws that wave as its ring, the way MilkDrop does, in time with the lights.
+With it, the MilkDrop presets dance to that wave, as in Music Assistant, and Liquid draws it as
+its ring, both in time with the lights.
 
 1. In Music Assistant, enable the plugin under **Settings > Plugins**.
 2. Create a long-lived token in Music Assistant (**Settings**, your profile).
@@ -198,6 +224,11 @@ Liquid is our own effect in the style of [MilkDrop](https://www.geisswerks.com/m
 Ryan Geiss, the music visualizer Music Assistant also offers as a plugin: a picture that keeps
 zooming, twisting and fading into itself while the music draws on it. No MilkDrop code or
 presets are used.
+
+The MilkDrop effect runs [Butterchurn](https://github.com/jberg/butterchurn) by Jordan Berg
+and the presets of [butterchurn-presets](https://www.npmjs.com/package/butterchurn-presets)
+(both MIT), made by many MilkDrop preset authors. They are downloaded when the add-on is built,
+not kept in this repository.
 
 The web UI's **Credits** link lists everyone this project builds on.
 

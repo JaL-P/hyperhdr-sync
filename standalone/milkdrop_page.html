@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HyperHDR Sync MilkDrop renderer</title>
+<!-- Runs in the bridge's own headless Chromium, never in a user's browser. Butterchurn draws
+     the MilkDrop presets from the waveform the bridge sends; the picture goes back to the
+     bridge, which samples it at the LEDs. One visualizer per slot: the LEDs and the web UI's
+     preview. -->
+<script src="vendor/butterchurn-presets.js"></script>
+</head>
+<body>
+<script type="module">
+import butterchurn from "./vendor/butterchurn.min.js";
+
+const params = new URLSearchParams(location.search);
+const WIDTH = Number(params.get("w")) || 128;
+const HEIGHT = Number(params.get("h")) || 72;
+const SLOTS = 2;
+const pack = self.all && (self.all.default || self.all);
+const presets = typeof pack.getPresets === "function" ? pack.getPresets() : pack;
+const audio = new AudioContext();
+const reader = document.createElement("canvas");
+reader.width = WIDTH;
+reader.height = HEIGHT;
+const readerContext = reader.getContext("2d", { willReadFrequently: true });
+
+const slots = [];
+for (let i = 0; i < SLOTS; i++) {
+  const canvas = document.createElement("canvas");
+  canvas.width = WIDTH;
+  canvas.height = HEIGHT;
+  const visualizer = butterchurn.createVisualizer(audio, canvas, {
+    width: WIDTH, height: HEIGHT, pixelRatio: 1, meshWidth: 32, meshHeight: 24,
+  });
+  slots.push({ canvas, visualizer, preset: null });
+}
+
+const url = new URL("ws", location.href);
+url.protocol = "ws:";
+const socket = new WebSocket(url);
+socket.binaryType = "arraybuffer";
+socket.onopen = () => socket.send(JSON.stringify({ type: "hello", presets: Object.keys(presets) }));
+socket.onclose = () => window.close();
+socket.onmessage = (event) => {
+  if (typeof event.data === "string") {
+    const message = JSON.parse(event.data);
+    const slot = slots[message.slot];
+    if (message.type === "preset" && slot && presets[message.name]) {
+      slot.visualizer.loadPreset(presets[message.name], Number(message.blend) || 0);
+      slot.preset = message.name;
+    }
+    return;
+  }
+  // [slot][1024 waveform bytes, 128 = zero] in; [slot][R G B per pixel, row by row] out.
+  const data = new Uint8Array(event.data);
+  const slot = slots[data[0]];
+  if (!slot || slot.preset === null) return;
+  const wave = data.subarray(1);
+  slot.visualizer.render({ audioLevels: { timeByteArray: wave, timeByteArrayL: wave, timeByteArrayR: wave } });
+  readerContext.drawImage(slot.canvas, 0, 0);
+  const rgba = readerContext.getImageData(0, 0, WIDTH, HEIGHT).data;
+  const out = new Uint8Array(1 + WIDTH * HEIGHT * 3);
+  out[0] = data[0];
+  for (let i = 0, j = 1; i < rgba.length; i += 4, j += 3) {
+    out[j] = rgba[i];
+    out[j + 1] = rgba[i + 1];
+    out[j + 2] = rgba[i + 2];
+  }
+  socket.send(out);
+};
+</script>
+</body>
+</html>

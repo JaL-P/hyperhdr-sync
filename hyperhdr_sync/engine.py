@@ -73,6 +73,14 @@ _LIQUID_W, _LIQUID_H = 48, 27
 _LIQUID_RING = 160
 # How long a waveform from the MilkDrop plugin is drawn before Liquid falls back to the spectrum.
 _WAVE_FRESH_S = 0.3
+# MilkDrop: how long a picture is shown, how often its colours refresh the MilkDrop palette
+# (and how quickly the palette follows), and where it is read: like a screen grabber, near
+# each LED's edge of the screen, averaged over a little depth.
+_PICTURE_FRESH_S = 0.5
+_PICTURE_PALETTE_S, _PICTURE_PALETTE_TAU = 0.1, 0.4
+_PICTURE_DEPTHS = (0.97, 0.9, 0.83)
+# The waveform made from the spectrum when Music Assistant's real one is not available.
+_SYNTH_SAMPLES, _SYNTH_RATE = 1024, 44100.0
 
 
 class Effect(StrEnum):
@@ -126,6 +134,12 @@ class Effect(StrEnum):
     Swirling trails that zoom, twist and fade into themselves, in the style of the
     MilkDrop visualizer (our own code; no MilkDrop code or presets are used).
     """
+    MILKDROP = "milkdrop"
+    """
+    The real MilkDrop presets, drawn by Butterchurn and sampled at the LEDs like a screen
+    grabber would. The pictures come from outside (see :meth:`Engine.feed`); the standalone
+    bridge renders them in a headless Chromium. Liquid stands in until a picture arrives.
+    """
 
 
 class AlbumMode(StrEnum):
@@ -167,6 +181,12 @@ class Palette(StrEnum):
     """Shades of the custom colour."""
     MINE = "mine"
     """The user's own colours (:attr:`EngineSettings.colors`), blended or as blocks."""
+    MILKDROP = "milkdrop"
+    """
+    The colours of the MilkDrop picture: with the MilkDrop effect, each preset's own colours
+    (any other palette tints the picture instead); with another effect, the colours at the
+    edges of the live picture, so they change with it. The rainbow until a picture arrives.
+    """
 
 
 class Response(StrEnum):
@@ -237,6 +257,11 @@ class EngineSettings:
     steps: bool = False
     """Show :attr:`Palette.MINE` as separate blocks of colour instead of blending them."""
 
+    @property
+    def uses_milkdrop(self) -> bool:
+        """Whether these settings show MilkDrop pictures (the MilkDrop effect or palette)."""
+        return self.effect == Effect.MILKDROP or self.palette == Palette.MILKDROP
+
 
 def parse_hex_color(value: str) -> tuple[int, int, int]:
     """
@@ -301,6 +326,24 @@ class Engine:
         )
         self._liquid_grid = (grid_u, grid_v)
         self._liquid_at = ((x * 2.0 - 1.0) * 0.92, (y * 2.0 - 1.0) * 0.92)
+        # MilkDrop: where each LED reads the picture (-1..1), at a few depths straight in
+        # from its edge, and the LEDs in order round the screen (for the MilkDrop palette).
+        across, down = x * 2.0 - 1.0, y * 2.0 - 1.0
+        self._picture_reads = [
+            (
+                np.where(self._side, across * depth, across * _PICTURE_DEPTHS[0]),
+                np.where(self._side, down * _PICTURE_DEPTHS[0], down * depth),
+            )
+            for depth in _PICTURE_DEPTHS
+        ]
+        self._ring_order = np.argsort(self._ring, kind="stable")
+        self._picture: np.ndarray | None = None
+        self._picture_at = -math.inf
+        self._picture_palette_due = 0.0
+        # The waveform made from the spectrum: a sine at the middle of each band.
+        self._synth_freqs = np.geomspace(SPECTRUM_F_MIN, SPECTRUM_F_MAX, SPECTRUM_BINS)
+        self._synth_phase = np.random.default_rng(5).random(SPECTRUM_BINS) * 2.0 * math.pi
+        self._synth_t = np.arange(_SYNTH_SAMPLES) / _SYNTH_RATE
         # Crystals: fixed shards around the screen, each tied to one frequency band.
         shards = max(4, count // 14)
         shard_rng = np.random.default_rng(11)
@@ -433,6 +476,7 @@ class Engine:
         spectrum: Sequence[int] | np.ndarray | None = None,
         onset: int | None = None,
         waveform: np.ndarray | None = None,
+        picture: np.ndarray | None = None,
     ) -> None:
         """
         Feed the feature values that became audible.
@@ -443,7 +487,12 @@ class Engine:
         :param onset: Visualizer ``peak`` onset strength (1-255).
         :param waveform: The sound wave sounding now (samples in -1..1), from Music
             Assistant's MilkDrop Visualizer plugin; Liquid draws it as its ring.
+        :param picture: The latest MilkDrop picture, rows of ``R G B`` in 0..1, for the
+            MilkDrop effect and palette.
         """
+        if picture is not None:
+            self._picture = np.asarray(picture, np.float32)
+            self._picture_at = self._time
         if waveform is not None and len(waveform) >= 2:
             wave = np.asarray(waveform, np.float32)
             at = np.linspace(0.0, wave.size - 1, _LIQUID_RING, dtype=np.float32)
@@ -507,7 +556,10 @@ class Engine:
             Effect.HORIZON: lambda: self._fx_horizon(dt),
             Effect.SIDE_BARS: self._fx_side_bars,
             Effect.LIQUID: lambda: self._fx_liquid(dt),
+            Effect.MILKDROP: lambda: self._fx_milkdrop(dt),
         }
+        if self.settings.palette == Palette.MILKDROP and self.settings.effect != Effect.MILKDROP:
+            self._follow_picture_colors(dt)
         frame = effects[self.settings.effect]()
         # Manual is a fixed light: it stays on through quiet passages.
         gate = 1.0 if self.settings.effect == Effect.MANUAL else self._gate
@@ -1096,6 +1148,79 @@ class Engine:
         frame: np.ndarray = _bilinear(self._liquid, *self._liquid_at)
         return frame
 
+    @property
+    def uses_milkdrop(self) -> bool:
+        """Whether the settings need MilkDrop pictures (the MilkDrop effect or palette)."""
+        return self.settings.uses_milkdrop
+
+    def has_fresh_picture(self) -> bool:
+        """Whether a MilkDrop picture arrived recently enough to show."""
+        return self._picture is not None and self._time - self._picture_at < _PICTURE_FRESH_S
+
+    def synth_waveform(self) -> bytes:
+        """
+        Return a waveform made from the spectrum, for MilkDrop when the real one is missing.
+
+        A sine at the middle of each band, as loud as the band, plus the beat on the bass:
+        enough for the presets to tell bass, mids and treble apart and to see the beats.
+
+        :return: 1024 unsigned bytes, 128 being zero, as Butterchurn takes them.
+        """
+        amplitude = self._bands.astype(np.float64) ** 1.5
+        amplitude[:3] *= 1.0 + 1.5 * self._pulse
+        phases = 2.0 * math.pi * np.outer(self._synth_freqs, self._synth_t + self._time)
+        wave = amplitude @ np.sin(phases + self._synth_phase[:, None])
+        peak = float(np.abs(wave).max())
+        if peak < 1e-6 or self._level < 0.01:
+            return bytes([128]) * _SYNTH_SAMPLES
+        wave *= (0.2 + 0.7 * self._level) / peak
+        return bytes(np.rint(np.clip(wave, -1.0, 1.0) * 127.0 + 128.0).astype(np.uint8))
+
+    def _read_picture(self) -> np.ndarray:
+        """Each LED's colour from the picture, averaged over a little depth from its edge."""
+        assert self._picture is not None
+        reads = [_bilinear(self._picture, u, v) for u, v in self._picture_reads]
+        colors: np.ndarray = np.mean(reads, axis=0)
+        return colors
+
+    def _fx_milkdrop(self, dt: float) -> np.ndarray:
+        """
+        Show the MilkDrop picture at the LEDs; any palette but MilkDrop tints it.
+
+        The tint works as in Music Assistant's visualizer (a colour blend): each LED keeps
+        the picture's brightness and takes its hue and saturation from the palette.
+
+        :param dt: Seconds since the previous frame.
+        """
+        if not self.has_fresh_picture():
+            return self._fx_liquid(dt)
+        colors = self._read_picture()
+        if self.settings.palette != Palette.MILKDROP:
+            colors = _blend_color(colors, _sample_wrap(self._lut_cyclic, self._ring))
+        return colors
+
+    def _follow_picture_colors(self, dt: float) -> None:
+        """Turn the colours round the edges of the live picture into the palette."""
+        del dt
+        if not self.has_fresh_picture() or self._time < self._picture_palette_due:
+            return
+        self._picture_palette_due = self._time + _PICTURE_PALETTE_S
+        colors = self._read_picture()[self._ring_order]
+        # Full brightness: the effect sets how bright, the palette only which colour.
+        peak = colors.max(axis=1, keepdims=True)
+        lit = peak[:, 0] > 0.04
+        if lit.sum() < 2:
+            return
+        colors = colors[lit] / peak[lit]
+        ring = self._ring[self._ring_order][lit]
+        at = np.arange(_LUT_SIZE) / _LUT_SIZE
+        table = np.stack(
+            [np.interp(at, ring, colors[:, c], period=1.0) for c in range(3)], axis=1
+        ).astype(np.float32)
+        follow = _alpha(_PICTURE_PALETTE_S, _PICTURE_PALETTE_TAU)
+        self._lut_cyclic += (table - self._lut_cyclic) * follow
+        self._lut_linear = self._lut_cyclic
+
     def _solid(self, level: float) -> np.ndarray:
         """Every LED in the custom colour at ``level``."""
         color = np.array(self.settings.color, np.float32) / 255.0 * level
@@ -1304,6 +1429,32 @@ def _bilinear(picture: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray:
     top = picture[y0, x0] * (1 - fx) + picture[y0, x0 + 1] * fx
     bottom = picture[y0 + 1, x0] * (1 - fx) + picture[y0 + 1, x0 + 1] * fx
     result: np.ndarray = (top * (1 - fy) + bottom * fy) * inside[..., None]
+    return result
+
+
+def _luminosity(colors: np.ndarray) -> np.ndarray:
+    """Luminosity of colours, as the CSS colour blend modes weigh it."""
+    lum: np.ndarray = colors @ np.array([0.3, 0.59, 0.11], np.float32)
+    return lum
+
+
+def _blend_color(base: np.ndarray, tint: np.ndarray) -> np.ndarray:
+    """
+    CSS ``mix-blend-mode: color``: the hue and saturation of ``tint``, the brightness of ``base``.
+
+    :param base: Colours to keep the luminosity of, rows of ``R G B`` in 0..1.
+    :param tint: Colours to take hue and saturation from, the same shape.
+    """
+    lum = _luminosity(base)[:, None]
+    colors = tint + (lum - _luminosity(tint)[:, None])
+    # Clip into range while keeping the luminosity (the CSS ClipColor step).
+    low = colors.min(axis=1, keepdims=True)
+    high = colors.max(axis=1, keepdims=True)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        colors = np.where(low < 0.0, lum + (colors - lum) * lum / (lum - low), colors)
+        high = colors.max(axis=1, keepdims=True)
+        colors = np.where(high > 1.0, lum + (colors - lum) * (1.0 - lum) / (high - lum), colors)
+    result: np.ndarray = np.clip(np.nan_to_num(colors), 0.0, 1.0).astype(np.float32)
     return result
 
 

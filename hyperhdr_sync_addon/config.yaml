@@ -42,8 +42,8 @@ schema:
   # no default: the add-on does not start until this is filled in
   hyperhdr_host: "str"
   name: "str"
-  effect: "list(spectrum|vu|pulse|ripple|scroll|energy|ambient|lumina|colora|retro|scanner|rhythm|party|manual|flow|centre_pulse|fireflies|snowfall|crystals|braids|embers|aurora|horizon|side_bars|liquid)"
-  palette: "list(album|rainbow|sunset|ocean|fire|forest|neon|aurora|pastel|ice|candy|lava|warm|classic|custom|mine)"
+  effect: "list(spectrum|vu|pulse|ripple|scroll|energy|ambient|lumina|colora|retro|scanner|rhythm|party|manual|flow|centre_pulse|fireflies|snowfall|crystals|braids|embers|aurora|horizon|side_bars|liquid|milkdrop)"
+  palette: "list(album|rainbow|sunset|ocean|fire|forest|neon|aurora|pastel|ice|candy|lava|warm|classic|custom|mine|milkdrop)"
   brightness: "int(0,100)"
   sensitivity: "float(-12,12)"
   response: "list(snappy|balanced|smooth)"
@@ -63,9 +63,11 @@ schema:
   udp_port: "port"
   web_port: "port"
   token: "password?"
-  # Music Assistant long-lived token: Liquid then draws the real sound wave from the
-  # MilkDrop Visualizer plugin
+  # Music Assistant long-lived token: MilkDrop and Liquid then follow the real sound wave
+  # from the MilkDrop Visualizer plugin
   ma_token: "password?"
   ma_url: "url?"
   milkdrop_player: "str?"
+  # the MilkDrop effect's preset; empty for a random one every 30 seconds
+  milkdrop_preset: "str?"
   log_level: "list(debug|info|warning|error)"

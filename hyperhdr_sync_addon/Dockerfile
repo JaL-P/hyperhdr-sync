@@ -7,12 +7,17 @@ FROM ghcr.io/home-assistant/base-python:3.14-alpine3.24-2026.11.0
 ARG BUILD_VERSION=0.5.2
 ARG BUILD_REF=main
 
+# Chromium draws the real MilkDrop presets (Butterchurn, in WebGL on its software renderer)
+# for the MilkDrop effect; it only runs while that effect or palette is in use.
+RUN apk add --no-cache chromium
+
 WORKDIR /app
 RUN echo "Building add-on ${BUILD_VERSION} from ${BUILD_REF}" \
     && curl -fsSL "https://github.com/JaL-P/hyperhdr-sync/archive/refs/heads/${BUILD_REF}.tar.gz" \
         | tar -xz --strip-components=1 \
     && rm -rf tests scripts .github .devcontainer .vscode \
-    && pip3 install --no-cache-dir --only-binary=:all: -r standalone/requirements.txt
+    && pip3 install --no-cache-dir --only-binary=:all: -r standalone/requirements.txt \
+    && python3 standalone/fetch_butterchurn.py
 
 COPY run.py /app/run.py
 

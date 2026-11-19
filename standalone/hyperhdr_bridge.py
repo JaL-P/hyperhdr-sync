@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import aiohttp
+import numpy as np
 
 # The rendering engine lives in the plugin's folder, next to this folder; the bridge's
 # own modules (web UI, MilkDrop waveform) live in this folder.
@@ -38,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from milkdrop import WaveformFeed, waveform_loop, web_url_from_sendspin
+from milkdrop_render import LIVE, PREVIEW, MilkdropRenderer
 
 from hyperhdr_sync.engine import (
     SPECTRUM_BINS,
@@ -112,6 +114,12 @@ class Bridge:
         self.client: SendspinClient | None = None
         # The sound wave from Music Assistant's MilkDrop Visualizer plugin, when set up.
         self.waveform: WaveformFeed | None = None
+        # Draws the real MilkDrop presets for the MilkDrop effect and palette, when set up,
+        # and the preset chosen for the LEDs and for the preview (empty: a random one).
+        self.milkdrop: MilkdropRenderer | None = None
+        self.milkdrop_preset = ""
+        self.preview_milkdrop_preset = ""
+        self._milkdrop_warned = False
         self.streaming = False
         # Settings being tried out in the web UI while music plays. When they differ from
         # the live ones, ``preview`` is a copy of the live engine (same gain, colours and
@@ -133,19 +141,27 @@ class Bridge:
         """How far ahead of the music the lights are rendered."""
         return self.latency_us // 1000
 
-    def apply(self, settings: EngineSettings, latency_ms: int, night_light: float) -> None:
+    def apply(
+        self,
+        settings: EngineSettings,
+        latency_ms: int,
+        night_light: float,
+        milkdrop_preset: str = "",
+    ) -> None:
         """
         Switch the LEDs to new settings, keeping the audio state.
 
         :param settings: The new rendering settings.
         :param latency_ms: How far ahead of the music to render.
         :param night_light: Night light brightness, 0..1 (0: off).
+        :param milkdrop_preset: The MilkDrop preset; empty for a random one now and then.
         """
         self.engine.update_settings(settings)
         self.latency_us = latency_ms * 1000
         self.night_light = night_light
+        self.milkdrop_preset = milkdrop_preset
         if self.preview_settings is not None:
-            self.set_preview(self.preview_settings)
+            self.set_preview(self.preview_settings, self.preview_milkdrop_preset)
         LOGGER.info(
             "Settings applied: %s, %s colours, brightness %d%%, sensitivity %+.0f dB, %s, "
             "%d ms, colour %s, night light %d%%",
@@ -159,7 +175,7 @@ class Bridge:
             round(night_light * 100),
         )
 
-    def set_preview(self, settings: EngineSettings) -> None:
+    def set_preview(self, settings: EngineSettings, milkdrop_preset: str | None = None) -> None:
         """
         Preview other settings against the music, starting from the live engine's state.
 
@@ -169,8 +185,12 @@ class Bridge:
         by what was changed.
 
         :param settings: The settings to preview.
+        :param milkdrop_preset: The MilkDrop preset to preview; None keeps the live one.
         """
-        if settings == self.engine.settings:
+        if milkdrop_preset is not None:
+            self.preview_milkdrop_preset = milkdrop_preset
+        same_preset = self.preview_milkdrop_preset == self.milkdrop_preset
+        if settings == self.engine.settings and (same_preset or not settings.uses_milkdrop):
             self.preview = None
         elif self.preview is None or self.preview_settings != settings:
             if self.preview is None:
@@ -271,7 +291,8 @@ class Bridge:
                     self.client.compute_server_time(self.client.now_us()) + self.latency_us
                 )
                 self._drain(playhead_us)
-                self._feed_waveform()
+                wave = self._feed_waveform()
+                await self._feed_milkdrop(wave)
                 rgb = self.engine.render(dt)
                 self.last_preview_rgb = rgb if self.preview is None else self.preview.render(dt)
                 self._stats["peak"] = max(self._stats["peak"], *rgb)
@@ -311,15 +332,53 @@ class Bridge:
                 for engine in engines:
                     engine.beat(1.0 if beat.is_downbeat else 0.8)
 
-    def _feed_waveform(self) -> None:
+    def _feed_waveform(self) -> np.ndarray | None:
         """Give the engines the sound wave sounding now, if the MilkDrop plugin sends it."""
         if self.waveform is None:
-            return
+            return None
         wave = self.waveform.current(self.latency_us)
         if wave is not None:
             self.engine.feed(waveform=wave)
             if self.preview is not None:
                 self.preview.feed(waveform=wave)
+        return wave
+
+    async def _feed_milkdrop(self, wave: np.ndarray | None) -> None:
+        """Have the MilkDrop presets drawn for the engines that show them."""
+        await self.render_milkdrop(self.engine, LIVE, wave)
+        if self.preview is not None:
+            await self.render_milkdrop(self.preview, PREVIEW, wave)
+
+    async def render_milkdrop(
+        self, engine: Engine, slot: int, wave: np.ndarray | None = None
+    ) -> None:
+        """
+        Send the next waveform to a MilkDrop slot and give ``engine`` its latest picture.
+
+        :param engine: The engine showing that slot.
+        :param slot: ``LIVE`` (the LEDs) or ``PREVIEW`` (the web UI).
+        :param wave: The real sound wave (-1..1), if there is one; else one made from the
+            engine's spectrum.
+        """
+        renderer = self.milkdrop
+        if renderer is None or not engine.settings.uses_milkdrop:
+            return
+        if (reason := renderer.unavailable_reason) is not None:
+            if not self._milkdrop_warned:
+                LOGGER.warning("%s; showing Liquid instead", reason)
+                self._milkdrop_warned = True
+            return
+        data = (
+            engine.synth_waveform()
+            if wave is None
+            else np.rint(np.clip(wave, -1.0, 1.0) * 127.0 + 128.0).astype(np.uint8).tobytes()
+        )
+        preset = self.milkdrop_preset if slot == LIVE else self.preview_milkdrop_preset
+        renderer.set_preset(slot, preset)
+        await renderer.render(slot, data)
+        picture = renderer.picture(slot)
+        if picture is not None:
+            engine.feed(picture=picture)
 
     def _send(self, rgb: bytes) -> None:
         self.last_rgb = rgb
@@ -444,6 +503,7 @@ async def demo_loop(bridge: Bridge) -> None:
         last_beat = beat
         # (the web UI feeds its preview the test beat itself while no music streams)
         bridge.engine.feed(loudness=loudness, spectrum=spectrum, onset=onset)
+        await bridge.render_milkdrop(bridge.engine, LIVE)
         bridge._send(bridge.engine.render(dt))  # noqa: SLF001
 
 
@@ -513,6 +573,8 @@ async def run(args: argparse.Namespace) -> None:
             args.night_light / 100.0,
             name=args.name,
         )
+        bridge.milkdrop = MilkdropRenderer(args.chromium)
+        bridge.milkdrop_preset = bridge.preview_milkdrop_preset = args.milkdrop_preset
         # Stop as cleanly on SIGTERM (a service or container stopping) as on Ctrl+C.
         task = asyncio.current_task()
         if task is not None and hasattr(signal, "SIGTERM"):
@@ -561,6 +623,7 @@ async def run(args: argparse.Namespace) -> None:
             sender.close()
             if web_runner is not None:
                 await web_runner.cleanup()
+            await bridge.milkdrop.close()
 
 
 def _parse_colors(value: str) -> tuple[tuple[int, int, int], ...]:
@@ -606,12 +669,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--ma-token",
         help="Music Assistant long-lived token (or set MA_TOKEN): with the MilkDrop Visualizer "
-        "plugin enabled, Liquid draws the real sound wave",
+        "plugin enabled, MilkDrop and Liquid follow the real sound wave",
     )
     parser.add_argument(
         "--ma-url",
         help="Music Assistant's web address for the MilkDrop waveform "
         "(default: the --server host, port 8095)",
+    )
+    parser.add_argument(
+        "--milkdrop-preset",
+        default="",
+        help="MilkDrop preset of the MilkDrop effect (default: a random one every 30 seconds)",
+    )
+    parser.add_argument(
+        "--chromium",
+        help="Chromium executable that draws the MilkDrop presets (default: found on the PATH)",
     )
     parser.add_argument(
         "--milkdrop-player",

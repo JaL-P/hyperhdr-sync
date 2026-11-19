@@ -46,7 +46,14 @@ GOOD = {
     "album_mode": "accent",
 }
 # What the page gets back for GOOD: the values as numbers, and no palette of the user's own.
-APPLIED = {**GOOD, "sensitivity": 3.0, "colors": [], "steps": False, "my_palettes": []}
+APPLIED = {
+    **GOOD,
+    "sensitivity": 3.0,
+    "colors": [],
+    "steps": False,
+    "my_palettes": [],
+    "milkdrop_preset": "",
+}
 
 
 class _NullSender:
@@ -214,6 +221,16 @@ async def test_page_shows_the_version() -> None:
         assert (await (await client.get("/api/state")).json())["version"] == "9.8.7"
     finally:
         await client.close()
+
+
+def test_milkdrop_preset_round_trips() -> None:
+    """The MilkDrop preset is a setting like the others; an absurdly long name is refused."""
+    settings = web_ui.parse_settings({**GOOD, "effect": "milkdrop", "milkdrop_preset": " martin "})
+    assert settings.milkdrop_preset == "martin"
+    assert web_ui.settings_to_dict(settings)["milkdrop_preset"] == "martin"
+    assert web_ui.parse_settings(GOOD).milkdrop_preset == ""
+    with pytest.raises(ValueError, match="preset"):
+        web_ui.parse_settings({**GOOD, "milkdrop_preset": "x" * 500})
 
 
 async def test_every_page_hears_the_status() -> None:

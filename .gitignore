@@ -8,3 +8,5 @@ __pycache__/
 # the data of the server that `scripts/run.sh` starts
 .data/
 .DS_Store
+# Butterchurn and its presets, fetched by standalone/fetch_butterchurn.py
+standalone/vendor/

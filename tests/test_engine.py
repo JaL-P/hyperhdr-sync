@@ -353,7 +353,8 @@ def test_no_two_effects_do_the_same_thing() -> None:
     over time, where the light sits and where it moves. Bars that simply grow with the
     loudness, for example, score about 0.8 against each other.
     """
-    effects = [effect for effect in Effect if effect != Effect.MANUAL]
+    # MilkDrop shows pictures drawn outside the engine; without them it is Liquid.
+    effects = [effect for effect in Effect if effect not in (Effect.MANUAL, Effect.MILKDROP)]
     signatures = {effect: _effect_signature(effect) for effect in effects}
     worst = []
     for a, b in itertools.combinations(effects, 2):
@@ -430,3 +431,78 @@ def test_own_palette_blends_or_shows_blocks() -> None:
     colours = {tuple(int(v * 255 + 0.5) for v in row) for row in swatch}
     assert colours == {red, blue}
     assert palette_swatch(Palette.MINE) == palette_swatch(Palette.RAINBOW), "no colours: rainbow"
+
+
+def _picture(left: tuple[int, int, int], right: tuple[int, int, int]) -> np.ndarray:
+    """Return a 96x54 picture: one colour on the left half, another on the right."""
+    picture = np.zeros((54, 96, 3), np.float32)
+    picture[:, :48] = np.array(left, np.float32) / 255.0
+    picture[:, 48:] = np.array(right, np.float32) / 255.0
+    return picture
+
+
+def test_milkdrop_shows_the_picture_at_the_edges() -> None:
+    """The LEDs take the colours at their edge of the picture, as a screen grabber would."""
+    engine = Engine(_tv_layout(), EngineSettings(effect=Effect.MILKDROP, palette=Palette.MILKDROP))
+    picture = _picture((255, 0, 0), (0, 0, 255))
+    frame = np.zeros((1, 3), int)
+    for _ in range(30):
+        engine.feed(loudness=LOUD, spectrum=[LOUD] * SPECTRUM_BINS, picture=picture)
+        frame = np.frombuffer(engine.render(DT), np.uint8).reshape(-1, 3).astype(int)
+    left, right = frame[:14], frame[-14:]
+    assert (left[:, 0] > 200).all()
+    assert (left[:, 2] < 30).all()
+    assert (right[:, 2] > 200).all()
+    assert (right[:, 0] < 30).all()
+
+
+def test_milkdrop_tint_keeps_the_brightness() -> None:
+    """Another palette tints the picture like Music Assistant does: its brightness stays."""
+    picture = _picture((255, 0, 0), (0, 0, 255))
+    frames = {}
+    for palette in (Palette.MILKDROP, Palette.OCEAN):
+        engine = Engine(_tv_layout(), EngineSettings(effect=Effect.MILKDROP, palette=palette))
+        frame = np.zeros((1, 3))
+        for _ in range(30):
+            engine.feed(loudness=LOUD, spectrum=[LOUD] * SPECTRUM_BINS, picture=picture)
+            frame = np.frombuffer(engine.render(DT), np.uint8).reshape(-1, 3) / 255.0
+        frames[palette] = frame
+    weights = np.array([0.3, 0.59, 0.11])
+    own, tinted = frames[Palette.MILKDROP], frames[Palette.OCEAN]
+    assert np.allclose(own @ weights, tinted @ weights, atol=0.03), "same luminosity"
+    assert not np.allclose(own, tinted, atol=0.1), "different colours"
+    assert (tinted[:14, 0] < tinted[:14, 2]).all(), "ocean blues instead of red"
+
+
+def test_milkdrop_falls_back_to_liquid_without_a_picture() -> None:
+    """Until a picture arrives (Chromium starting), Liquid stands in rather than darkness."""
+    engine = Engine(_tv_layout(), EngineSettings(effect=Effect.MILKDROP))
+    frame = _settle(engine, [LOUD] * SPECTRUM_BINS, frames=60)
+    assert frame.max() > 50
+    assert engine.uses_milkdrop
+    assert not engine.has_fresh_picture()
+
+
+def test_milkdrop_palette_follows_the_picture() -> None:
+    """With another effect, the MilkDrop palette takes the colours round the picture's edges."""
+    engine = Engine(_tv_layout(), EngineSettings(effect=Effect.LUMINA, palette=Palette.MILKDROP))
+    assert engine.uses_milkdrop
+    picture = _picture((0, 255, 0), (0, 255, 0))
+    frame = np.zeros((1, 3), int)
+    for _ in range(120):
+        engine.feed(loudness=LOUD, spectrum=[LOUD] * SPECTRUM_BINS, picture=picture)
+        frame = np.frombuffer(engine.render(DT), np.uint8).reshape(-1, 3).astype(int)
+    assert frame.max() > 50
+    assert (frame[:, 1] >= frame[:, 0]).all()
+    assert (frame[:, 1] >= frame[:, 2]).all()
+    assert frame[:, 1].sum() > 3 * frame[:, 0].sum(), "green, from the picture"
+
+
+def test_synth_waveform_follows_the_music() -> None:
+    """The waveform made from the spectrum is flat in silence and loud with loud music."""
+    engine = Engine(_tv_layout(), EngineSettings(effect=Effect.MILKDROP))
+    assert engine.synth_waveform() == bytes([128]) * 1024
+    _settle(engine, [LOUD] * SPECTRUM_BINS, frames=30)
+    wave = np.frombuffer(engine.synth_waveform(), np.uint8).astype(int) - 128
+    assert len(wave) == 1024
+    assert np.abs(wave).max() > 60

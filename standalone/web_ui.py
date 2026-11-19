@@ -29,6 +29,7 @@ from urllib.parse import urlsplit
 
 import aiohttp
 from aiohttp import web
+from milkdrop_render import LIVE, PREVIEW
 
 from hyperhdr_sync.engine import (
     AlbumMode,
@@ -113,6 +114,10 @@ EFFECT_LABELS = {
         "Liquid",
         "Swirling trails that zoom, twist and fade into themselves, like the MilkDrop visualizer",
     ),
+    Effect.MILKDROP: (
+        "MilkDrop",
+        "The real MilkDrop presets, as in Music Assistant's visualizer, seen by the LEDs",
+    ),
     Effect.MANUAL: ("Manual", "Every LED in the custom colour; does not follow the music"),
 }
 PALETTE_LABELS = {
@@ -131,6 +136,7 @@ PALETTE_LABELS = {
     Palette.NEON: "Neon",
     Palette.CANDY: "Candy",
     Palette.PASTEL: "Pastel",
+    Palette.MILKDROP: "MilkDrop",
 }
 # Palette.MINE is left out: the user makes it on the page instead of picking it.
 ALBUM_MODE_LABELS = {
@@ -155,6 +161,7 @@ NIGHT_LIGHT_RANGE = (0, 100)
 PALETTE_COLORS_RANGE = (2, 6)
 MAX_MY_PALETTES = 12
 MAX_PALETTE_NAME = 24
+MAX_PRESET_NAME = 200
 
 
 @dataclass(frozen=True)
@@ -167,6 +174,8 @@ class UiSettings:
     """Night light brightness, 0..1 (0: hand the LEDs back to HyperHDR when idle)."""
     my_palettes: tuple[MyPalette, ...] = ()
     """The palettes the user made on the page, to pick from again."""
+    milkdrop_preset: str = ""
+    """The preset of the MilkDrop effect; empty for a random one every 30 seconds."""
 
 
 @dataclass(frozen=True)
@@ -202,6 +211,7 @@ def settings_to_dict(settings: UiSettings) -> dict[str, Any]:
             {"name": p.name, "colors": ",".join(hex_color(c) for c in p.colors), "steps": p.steps}
             for p in settings.my_palettes
         ],
+        "milkdrop_preset": settings.milkdrop_preset,
     }
 
 
@@ -227,8 +237,11 @@ def parse_settings(data: Any) -> UiSettings:
         colors = _parse_colors(data.get("colors", []))
         steps = bool(data.get("steps", False))
         my_palettes = _parse_my_palettes(data.get("my_palettes", []))
+        milkdrop_preset = str(data.get("milkdrop_preset") or "").strip()
     except (KeyError, TypeError) as err:
         raise ValueError(f"missing or invalid setting: {err}") from err
+    if len(milkdrop_preset) > MAX_PRESET_NAME:
+        raise ValueError(f"the MilkDrop preset name is longer than {MAX_PRESET_NAME} characters")
     if palette == Palette.MINE and len(colors) < PALETTE_COLORS_RANGE[0]:
         raise ValueError(f"your own palette needs at least {PALETTE_COLORS_RANGE[0]} colours")
     for name, value, (low, high) in (
@@ -250,7 +263,7 @@ def parse_settings(data: Any) -> UiSettings:
         colors=colors,
         steps=steps,
     )
-    return UiSettings(engine, latency_ms, night_light / 100.0, my_palettes)
+    return UiSettings(engine, latency_ms, night_light / 100.0, my_palettes, milkdrop_preset)
 
 
 def _parse_colors(value: Any) -> tuple[tuple[int, int, int], ...]:
@@ -418,9 +431,11 @@ class WebUi:
             settings = parse_settings(await request.json())
         except (ValueError, json.JSONDecodeError) as err:
             return web.json_response({"error": str(err)}, status=400)
-        self._bridge.apply(settings.engine, settings.latency_ms, settings.night_light)
+        self._bridge.apply(
+            settings.engine, settings.latency_ms, settings.night_light, settings.milkdrop_preset
+        )
         self._my_palettes = settings.my_palettes
-        self._set_preview(settings.engine)
+        self._set_preview(settings.engine, settings.milkdrop_preset)
         self._preview_night_light = settings.night_light
         result: dict[str, Any] = {"settings": self._current(), "saved": False}
         if self._saver is not None:
@@ -464,7 +479,7 @@ class WebUi:
         except (ValueError, json.JSONDecodeError) as err:
             await ws.send_json({"type": "error", "message": str(err)})
             return
-        self._set_preview(settings.engine)
+        self._set_preview(settings.engine, settings.milkdrop_preset)
         self._preview_night_light = settings.night_light
         if data.get("mode") in ("music", "idle"):
             self._preview_mode = data["mode"]
@@ -512,6 +527,7 @@ class WebUi:
                     onset=200 if beat != last_beat else None,
                 )
                 last_beat = beat
+                await self._bridge.render_milkdrop(idle, PREVIEW)
                 preview_rgb = idle.render(dt)
             # Read both at once, so the two pictures show the same moment.
             frame = self._bridge.last_rgb + preview_rgb
@@ -533,13 +549,27 @@ class WebUi:
     # --------------------------------------------------------------- helpers
 
     def _status(self) -> dict[str, Any]:
-        """Return whether music plays, where it comes from and the player's name."""
+        """Return whether music plays, where it comes from, the player's name and MilkDrop."""
         bridge = self._bridge
-        return {"playing": bridge.streaming, "source": bridge.source, "player": bridge.name}
+        status: dict[str, Any] = {
+            "playing": bridge.streaming,
+            "source": bridge.source,
+            "player": bridge.name,
+        }
+        renderer = bridge.milkdrop
+        if renderer is not None:
+            # The preview shows the live frame while music plays and nothing differs.
+            slot = LIVE if bridge.streaming and bridge.preview is None else PREVIEW
+            status["milkdrop"] = {
+                "presets": renderer.presets,
+                "showing": renderer.now_showing(slot),
+                "unavailable": renderer.unavailable_reason,
+            }
+        return status
 
-    def _set_preview(self, settings: EngineSettings) -> None:
+    def _set_preview(self, settings: EngineSettings, milkdrop_preset: str | None = None) -> None:
         self._preview_settings = settings
-        self._bridge.set_preview(settings)
+        self._bridge.set_preview(settings, milkdrop_preset)
         if self._idle_engine is not None:
             self._idle_engine.update_settings(settings)
 
@@ -553,7 +583,11 @@ class WebUi:
         bridge = self._bridge
         return settings_to_dict(
             UiSettings(
-                bridge.engine.settings, bridge.latency_ms, bridge.night_light, self._my_palettes
+                bridge.engine.settings,
+                bridge.latency_ms,
+                bridge.night_light,
+                self._my_palettes,
+                bridge.milkdrop_preset,
             )
         )
 

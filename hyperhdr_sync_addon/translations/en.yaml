@@ -10,10 +10,10 @@ configuration:
     description: "Name of the player that appears in Music Assistant."
   effect:
     name: "Effect"
-    description: "spectrum, vu (level meter), pulse, ripple, scroll, energy, ambient, lumina (adaptive brightness), colora (adaptive colour), retro, scanner, rhythm, party, flow, centre_pulse, fireflies, snowfall, crystals, braids, embers, aurora, horizon, side_bars, liquid, or manual (the custom colour, not following the music). The web UI previews them."
+    description: "spectrum, vu (level meter), pulse, ripple, scroll, energy, ambient, lumina (adaptive brightness), colora (adaptive colour), retro, scanner, rhythm, party, flow, centre_pulse, fireflies, snowfall, crystals, braids, embers, aurora, horizon, side_bars, liquid, milkdrop (the real MilkDrop presets), or manual (the custom colour, not following the music). The web UI previews them."
   palette:
     name: "Colours"
-    description: "album uses the colours of the cover art, classic is green-yellow-red, custom uses shades of the custom colour, mine uses your own palette (make it in the web UI)."
+    description: "album uses the colours of the cover art, classic is green-yellow-red, custom uses shades of the custom colour, mine uses your own palette (make it in the web UI), milkdrop uses the colours of the MilkDrop picture."
   album_mode:
     name: "Artwork colours"
     description: "How the album colours are picked from the cover: vibrant (all colours, boosted), dominant (the main colour), accent, natural (as on the cover), pastel or contrast (main colour and its opposite)."
@@ -55,10 +55,13 @@ configuration:
     description: "Only needed when HyperHDR is on another subnet than Home Assistant."
   ma_token:
     name: "Music Assistant token (MilkDrop waveform)"
-    description: "Optional. A long-lived token from Music Assistant (Settings, your profile). With the MilkDrop Visualizer plugin enabled, the Liquid effect draws the real sound wave."
+    description: "Optional. A long-lived token from Music Assistant (Settings, your profile). With the MilkDrop Visualizer plugin enabled, the MilkDrop and Liquid effects follow the real sound wave."
   ma_url:
     name: "Music Assistant web address"
     description: "Optional. Defaults to the Sendspin address's host on port 8095, for example http://127.0.0.1:8095."
+  milkdrop_preset:
+    name: "MilkDrop preset"
+    description: "The preset of the MilkDrop effect, by name; empty shows a random one every 30 seconds. Easiest to pick in the web UI."
   milkdrop_player:
     name: "MilkDrop player"
     description: "Optional. The Music Assistant player id whose sound wave to draw; empty follows the player that is playing."

@@ -138,6 +138,11 @@
   .tile .info { flex: none; width: 30px; height: 30px; margin-right: 6px; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
   .tile .info:hover, .tile .info[aria-expanded="true"] { background: var(--card); color: var(--text); }
   .tile .info svg { width: 16px; height: 16px; }
+  .milkdrop-box { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 14px; padding: 12px 14px; border-radius: 13px; background: var(--chip); }
+  .milkdrop-row { display: flex; gap: 8px; align-items: center; }
+  .milkdrop-row select { flex: 1; width: 0; min-width: 0; text-overflow: ellipsis; padding: 7px 10px; border: 1px solid var(--input); border-radius: 9px; background: var(--card); color: var(--text); font: inherit; font-size: 14px; }
+  .milkdrop-row .chip-btn { margin-left: 0; background: var(--card); }
+  .milkdrop-box .hint { margin: 0; }
   .tile .tip { margin: -4px 14px 12px; font-size: 13px; line-height: 1.4; color: var(--muted); }
   .tile.on { border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: var(--accent-soft); box-shadow: 0 0 28px -12px var(--accent); }
   .tile.on .pick { color: var(--accent); }
@@ -145,7 +150,8 @@
   .link { justify-self: start; border: 0; background: none; padding: 2px 0; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; }
   .link:hover { text-decoration: underline; }
 
-  .sources { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .sources { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  @media (max-width: 560px) { .sources { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .source { display: grid; gap: 8px; min-width: 0; padding: 10px 12px; text-align: left; border: 1px solid transparent; border-radius: 13px; background: var(--chip); cursor: pointer; font-weight: 600; font-size: 14px; line-height: 1.2; }
   .source:hover { background: var(--chip-hover); }
   .source[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
@@ -334,6 +340,14 @@
       <section aria-labelledby="effect-label">
         <div class="section-head"><h2 class="label" id="effect-label">Effect</h2><p class="hint" id="effect-hint"></p><button type="button" class="chip-btn" id="random" title="Preview a random effect"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>Random</button></div>
         <div id="effects"></div>
+        <div class="milkdrop-box" id="milkdrop-box" hidden>
+          <label class="label" for="milkdrop-preset">MilkDrop preset</label>
+          <div class="milkdrop-row">
+            <select id="milkdrop-preset"></select>
+            <button type="button" class="chip-btn" id="milkdrop-shuffle" title="Pick a random preset and keep it">Another</button>
+          </div>
+          <p class="hint" id="milkdrop-now" aria-live="polite"></p>
+        </div>
       </section>
       <section aria-labelledby="colours-label">
         <div class="section-head"><h2 class="label" id="colours-label">Colours</h2><p class="hint" id="colours-hint"></p></div>
@@ -422,7 +436,9 @@
       <dt><a href="https://github.com/SamXop123/Paraline" target="_blank" rel="noopener">Paraline</a> by SamXop123</dt>
       <dd>The ideas behind Flow, Centre pulse, Fireflies, Snowfall, Crystals, Braids, Embers, Aurora, Horizon and Side bars. Our own versions for LED strips; no Paraline code is used.</dd>
       <dt><a href="https://www.geisswerks.com/milkdrop/" target="_blank" rel="noopener">MilkDrop</a> by Ryan Geiss</dt>
-      <dd>The style of Liquid: a picture that keeps zooming, twisting and fading into itself. Our own code; no MilkDrop code or presets are used.</dd>
+      <dd>The visualizer behind the MilkDrop effect (through Butterchurn) and the style of Liquid, our own effect.</dd>
+      <dt><a href="https://github.com/jberg/butterchurn" target="_blank" rel="noopener">Butterchurn</a> by Jordan Berg</dt>
+      <dd>MilkDrop rewritten for WebGL: it draws the MilkDrop effect, with the presets of <a href="https://www.npmjs.com/package/butterchurn-presets" target="_blank" rel="noopener">butterchurn-presets</a> made by many MilkDrop preset authors. Both MIT licensed.</dd>
       <dt><a href="https://www.music-assistant.io/" target="_blank" rel="noopener">Music Assistant</a></dt>
       <dd>Plays the music and sends its beat, loudness, spectrum and cover colours over Sendspin (<a href="https://github.com/Sendspin/aiosendspin" target="_blank" rel="noopener">aiosendspin</a>).</dd>
       <dt><a href="https://github.com/awawa-dev/HyperHDR" target="_blank" rel="noopener">HyperHDR</a> by awawa-dev</dt>
@@ -447,7 +463,7 @@
 "use strict";
 (() => {
   const KEYS = ["effect", "palette", "brightness", "sensitivity", "response", "latency_ms", "color",
-    "night_light", "album_mode", "colors", "steps", "my_palettes"];
+    "night_light", "album_mode", "colors", "steps", "my_palettes", "milkdrop_preset"];
   // Intensity: each step sets the sensitivity (dB); Fine-tuning sets it exactly, with the response.
   const INTENSITY = [
     ["subtle", "Subtle", -8, "Soft and dim; only the loudest moments stand out."],
@@ -460,15 +476,17 @@
     effect: "effect", palette: "colours", brightness: "brightness", sensitivity: "sensitivity",
     response: "response", latency_ms: "latency", color: "your colour", night_light: "glow",
     album_mode: "artwork colours", colors: "palette colours", steps: "palette style", my_palettes: "saved palettes",
+    milkdrop_preset: "MilkDrop preset",
   };
   const SLIDERS = ["brightness", "sensitivity", "latency_ms", "night_light"];
   // Every effect, grouped by mood; all of them are always shown.
   const MOODS = [
     ["calm", "Calm", ["lumina", "ambient", "colora", "aurora", "braids", "embers", "snowfall", "manual"]],
     ["beat", "On the beat", ["rhythm", "party", "pulse", "ripple", "scanner", "flow", "centre_pulse", "fireflies", "horizon"]],
-    ["sound", "Shows the sound", ["spectrum", "retro", "vu", "energy", "scroll", "side_bars", "crystals", "liquid"]],
+    ["sound", "Shows the sound", ["spectrum", "retro", "vu", "energy", "scroll", "side_bars", "crystals"]],
+    ["visual", "Visualizer", ["milkdrop", "liquid"]],
   ];
-  const MOOD_HINTS = { calm: "Gentle light that follows the mood", beat: "Moves with the rhythm", sound: "Draws bass, mids and treble" };
+  const MOOD_HINTS = { calm: "Gentle light that follows the mood", beat: "Moves with the rhythm", sound: "Draws bass, mids and treble", visual: "Pictures like Music Assistant's MilkDrop visualizer" };
   const PRESETS = [
     ["#ff9329", "Warm white"], ["#fff4e5", "Soft white"], ["#ffffff", "Cool white"],
     ["#ff3b1f", "Red"], ["#ff8a00", "Amber"], ["#2bff6a", "Green"],
@@ -482,6 +500,7 @@
     ranges: {}, playing: false, connected: false, message: null, mode: "music",
     editor: null, lastGlow: 30, preview: null, info: null,
     source: "connecting", player: "HyperHDR LEDs", stoppedAt: 0,
+    milkdrop: { presets: [], showing: null, unavailable: null },
   };
   // How long the music may pause (between tracks, a skip) before the page says nothing reaches the LEDs.
   const QUIET_MS = 5000;
@@ -649,6 +668,7 @@
   function source() {
     if (ui.pending.palette === "album") return "album";
     if (ui.pending.palette === "custom") return "custom";
+    if (ui.pending.palette === "milkdrop") return "milkdrop";
     return "palette";
   }
 
@@ -684,6 +704,31 @@
     $("effect-hint").textContent = p.effect === "manual" ? "Ignores the music" : mood ? MOOD_HINTS[mood[0]] : "";
   }
 
+  // The MilkDrop preset: random every 30 seconds, or one kept. The list arrives once the
+  // bridge's renderer has started, which happens when MilkDrop is first shown.
+  let presetList = null;
+  function renderMilkdrop() {
+    const p = ui.pending, md = ui.milkdrop;
+    const box = $("milkdrop-box");
+    box.hidden = p.effect !== "milkdrop";
+    if (box.hidden) return;
+    const select = $("milkdrop-preset");
+    const names = md.presets || [];
+    const key = names.length + ":" + p.milkdrop_preset;
+    if (presetList !== key && document.activeElement !== select) {
+      presetList = key;
+      const options = [el("option", { value: "", textContent: "Random, a new one every 30 seconds" })];
+      if (p.milkdrop_preset && !names.includes(p.milkdrop_preset)) options.push(el("option", { value: p.milkdrop_preset, textContent: p.milkdrop_preset }));
+      for (const name of names) options.push(el("option", { value: name, textContent: name }));
+      select.replaceChildren(...options);
+      select.value = p.milkdrop_preset;
+    }
+    $("milkdrop-shuffle").disabled = !names.length;
+    $("milkdrop-now").textContent = md.unavailable ? `${md.unavailable}. Liquid stands in.`
+      : !names.length ? "Starting the MilkDrop renderer…"
+      : md.showing ? `Showing: ${md.showing}` : "";
+  }
+
   function colourDots(container, idPrefix) {
     const p = ui.pending;
     container.replaceChildren();
@@ -708,8 +753,11 @@
     const p = ui.pending;
     const manual = p.effect === "manual";
     $("sources").hidden = manual;
-    $("colours-hint").textContent = manual ? "Solid colour uses one colour" : "";
-    const builtIn = ui.palettes.filter((x) => x.id !== "album" && x.id !== "custom");
+    $("colours-hint").textContent = manual ? "Solid colour uses one colour"
+      : p.palette === "milkdrop" ? (p.effect === "milkdrop" ? "Each preset's own colours" : "The colours of the live MilkDrop picture")
+      : p.effect === "milkdrop" ? "Tints the MilkDrop picture, like Music Assistant" : "";
+    const builtIn = ui.palettes.filter((x) => !["album", "custom", "milkdrop"].includes(x.id));
+    const milkdrop = ui.palettes.find((x) => x.id === "milkdrop");
     const album = ui.palettes.find((x) => x.id === "album");
     const current = source();
     const paletteColors = p.palette === "mine" ? p.colors : (builtIn.find((x) => x.id === p.palette) || builtIn[0] || { colors: [] }).colors;
@@ -717,6 +765,7 @@
       ["album", "Album cover", album ? album.colors : []],
       ["palette", "Palette", paletteColors],
       ["custom", "Your colour", customSwatch(p.color)],
+      ["milkdrop", "MilkDrop", milkdrop ? milkdrop.colors : []],
     ];
     const box = $("sources");
     box.replaceChildren();
@@ -729,6 +778,7 @@
       b.addEventListener("click", () => {
         if (id === "album") setPending({ palette: "album" });
         else if (id === "custom") setPending({ palette: "custom" });
+        else if (id === "milkdrop") setPending({ palette: "milkdrop" });
         else if (current !== "palette") setPending({ palette: ui.lastPalette || (builtIn[0] && builtIn[0].id) || "rainbow" });
       });
       box.append(b);
@@ -911,6 +961,7 @@
   function render() {
     const p = ui.pending, a = ui.applied;
     renderEffects();
+    renderMilkdrop();
     renderColours();
     for (const key of SLIDERS) {
       if (key === "night_light") continue;
@@ -997,10 +1048,11 @@
     ui.playing = data.playing;
     if (data.source) ui.source = data.source;
     if (data.player) ui.player = data.player;
+    if (data.milkdrop) ui.milkdrop = data.milkdrop;
   }
 
   function setPending(change, { keepFocus } = {}) {
-    if (change.palette && !["album", "custom", "mine"].includes(change.palette)) ui.lastPalette = change.palette;
+    if (change.palette && !["album", "custom", "mine", "milkdrop"].includes(change.palette)) ui.lastPalette = change.palette;
     ui.pending = { ...ui.pending, ...change };
     ui.message = null;
     sendPreview();
@@ -1105,7 +1157,7 @@
     ui.responses = state.responses;
     ui.ranges = state.ranges;
     if (state.settings.night_light > 0) ui.lastGlow = state.settings.night_light;
-    if (!["album", "custom", "mine"].includes(state.settings.palette)) ui.lastPalette = state.settings.palette;
+    if (!["album", "custom", "mine", "milkdrop"].includes(state.settings.palette)) ui.lastPalette = state.settings.palette;
     const count = state.leds.x.length;
     $("count").textContent = `${count} LEDs`;
     $("layout-note").textContent = `The LED layout comes from HyperHDR: ${count} LEDs. Change it there, and this preview follows.`;
@@ -1129,6 +1181,11 @@
     for (const button of $("themes").children) button.addEventListener("click", () => setTheme(button.dataset.theme));
     $("apply").addEventListener("click", apply);
     $("random").addEventListener("click", randomEffect);
+    $("milkdrop-preset").addEventListener("change", (event) => setPending({ milkdrop_preset: event.target.value }, { keepFocus: "milkdrop-preset" }));
+    $("milkdrop-shuffle").addEventListener("click", () => {
+      const names = (ui.milkdrop.presets || []).filter((n) => n !== ui.pending.milkdrop_preset);
+      if (names.length) setPending({ milkdrop_preset: names[Math.floor(Math.random() * names.length)] });
+    });
     const credits = $("credits");
     $("credits-open").addEventListener("click", () => credits.showModal());
     $("credits-close").addEventListener("click", () => credits.close());

@@ -81,7 +81,13 @@ class HyperHdrProvider(PluginProvider):
                 key=CONF_EFFECT,
                 type=ConfigEntryType.STRING,
                 default_value=DEFAULT_EFFECT.value,
-                options=[ConfigValueOption(effect.value) for effect in Effect],
+                # MilkDrop needs pictures from a headless Chromium, which only the
+                # standalone bridge and the add-on run.
+                options=[
+                    ConfigValueOption(effect.value)
+                    for effect in Effect
+                    if effect != Effect.MILKDROP
+                ],
                 immediate_apply=True,
                 category="settings",
             ),
@@ -92,7 +98,7 @@ class HyperHdrProvider(PluginProvider):
                 options=[
                     ConfigValueOption(palette.value)
                     for palette in Palette
-                    if palette != Palette.MINE
+                    if palette not in (Palette.MINE, Palette.MILKDROP)
                 ],
                 immediate_apply=True,
                 category="settings",

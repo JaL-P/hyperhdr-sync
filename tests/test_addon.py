@@ -60,6 +60,9 @@ def test_config_is_complete() -> None:
     assert "ARG BUILD_REF=main\n" in dockerfile
     assert "refs/heads/${BUILD_REF}.tar.gz" in dockerfile
     assert '"Building add-on ${BUILD_VERSION} from ${BUILD_REF}"' in dockerfile
+    # Chromium and Butterchurn (checked against its published checksum) for MilkDrop.
+    assert "apk add --no-cache chromium" in dockerfile
+    assert "python3 standalone/fetch_butterchurn.py" in dockerfile
 
 
 def test_choices_match_engine() -> None:
@@ -109,12 +112,14 @@ def test_milkdrop_options_reach_the_bridge(monkeypatch: pytest.MonkeyPatch, tmp_
         "ma_token": "ma-secret",
         "ma_url": "http://192.168.1.5:8095",
         "milkdrop_player": "media_player.tv",
+        "milkdrop_preset": "martin - mucus cervix",
     }
     argv = run.options_to_argv(options)
     assert "ma-secret" not in argv
     args = bridge.parse_args(argv)
     assert args.ma_url == "http://192.168.1.5:8095"
     assert args.milkdrop_player == "media_player.tv"
+    assert args.milkdrop_preset == "martin - mucus cervix"
     assert args.ma_token is None
     defaults = bridge.parse_args(
         run.options_to_argv({**_config()["options"], "hyperhdr_host": "x"})

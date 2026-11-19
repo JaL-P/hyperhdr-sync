@@ -138,6 +138,6 @@ mark-parentheses = false
 known-first-party = ["music_assistant"]
 
 [tool.codespell]
-skip = "uv.lock,LICENSE,*/translations/*"
+skip = "uv.lock,LICENSE,*/translations/*,*/vendor/*"
 # Embedded images (base64 data URIs) are not words.
 ignore-regex = "data:[a-z]+/[a-z+.-]+;base64,[A-Za-z0-9+/=]+"

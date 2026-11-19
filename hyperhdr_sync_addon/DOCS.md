@@ -19,6 +19,12 @@ preview changes straight away, following the music that is playing or a built-in
 your LEDs keep their current look. **Apply** puts the new settings on the LEDs and saves them in
 the add-on's configuration.
 
+**MilkDrop** (under Visualizer) shows the real MilkDrop presets, as in Music Assistant's
+visualizer, seen by the LEDs like a screen grabber would. Pick a preset under the effects, or
+keep Random for a new one every 30 seconds. **Colours > MilkDrop** keeps the presets' own
+colours; Album cover, a Palette or Your colour tint the picture, as Music Assistant does. The
+add-on draws the presets in a built-in Chromium, which only runs while MilkDrop is in use.
+
 **Random** next to Effect previews a different effect each time you press it. **Credits** at the
 bottom lists the projects HyperHDR Sync builds on.
 
@@ -33,8 +39,9 @@ the `name` option).
   runs as an add-on here. Otherwise use `ws://MUSIC-ASSISTANT-IP:8927/sendspin`.
 - **API token**: only needed when HyperHDR is on a different subnet. Create one in HyperHDR under
   **Token Management**.
-- **Music Assistant token (MilkDrop waveform)**: optional. With it, the **Liquid** effect draws
-  the real sound wave, like MilkDrop does, instead of a ring shaped by the spectrum. In Music
+- **Music Assistant token (MilkDrop waveform)**: optional. With it, the **MilkDrop** presets dance
+  to the real sound wave, and **Liquid** draws it as its ring, instead of a wave made from the
+  spectrum. In Music
   Assistant, enable the **MilkDrop Visualizer** plugin (Settings > Plugins), then create a
   long-lived token (Settings, your profile) and paste it here. **Music Assistant web address**
   is only needed when Music Assistant is not on port 8095 of the Sendspin address's host;
