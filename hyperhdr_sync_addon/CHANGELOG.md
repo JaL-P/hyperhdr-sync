@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.1
+
+- Intensity, under Brightness in the web UI: five steps from Subtle to Intense set how strongly
+  the lights react, without opening Fine-tuning (each step sets sensitivity and response).
+- A Ko-fi link to support the project: a note at the top of the web UI, which you can close,
+  and a card in the footer. The card's image is part of the page, so opening the panel does
+  not contact Ko-fi.
+
 ## 0.4.0
 
 - The add-on builds from the latest code on `main` instead of a release tag of the same
