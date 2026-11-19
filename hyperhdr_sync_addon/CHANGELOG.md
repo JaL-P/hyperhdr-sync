@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.0
+
+- Ten new effects, our own takes on ideas from [Paraline](https://github.com/SamXop123/Paraline)
+  by SamXop123 (written from its descriptions; no code taken): Flow, Centre pulse, Fireflies,
+  Snowfall, Crystals, Braids, Embers, Aurora, Horizon and Side bars. The web UI lists them
+  under their moods behind "Show all".
+- Intensity sets only the sensitivity, so 0 dB always shows as Normal, whatever the response
+  under Fine-tuning.
+- The Ko-fi note sits at the top of the page instead of floating over the header. Closing it
+  hides it until the page is opened again; tick "Don't show this again" to hide it for good.
+- Messages such as "Applied to your LEDs" appear at the top of the page and stay in view; the
+  bar at the bottom only shows unapplied changes.
+
 ## 0.4.1
 
 - Intensity, under Brightness in the web UI: five steps from Subtle to Intense set how strongly

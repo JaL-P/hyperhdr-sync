@@ -125,6 +125,16 @@ off while Music Assistant starts, and re-reads the layout when music starts.
 | Scroll | The colour of the current sound flows upwards |
 | Energy | Bass rises from the bottom, treble drops from the top; they meet in between |
 | Ambient | Calm colours turning around the screen; the music sets the speed, not the brightness |
+| Flow | Comets of light circling the screen, faster when louder. Inspired by Paraline |
+| Centre pulse | Every beat sends a pulse from the middle of each edge to the corners. Inspired by Paraline |
+| Fireflies | Small lights drifting around the screen; beats speed them up. Inspired by Paraline |
+| Snowfall | Glowing flakes falling down the sides, more with the treble. Inspired by Paraline |
+| Crystals | Shards that flare with their own frequency and flutter with the treble. Inspired by Paraline |
+| Braids | Two strands of colour winding along the sides, crossing as they move. Inspired by Paraline |
+| Embers | A flickering glow with sparks rising from the bottom on the bass. Inspired by Paraline |
+| Aurora | Slow, folded curtains of colour rising from the bottom. Inspired by Paraline |
+| Horizon | A sun at the top pulsing with the bass, grid lines rushing down the sides. Inspired by Paraline |
+| Side bars | Bars growing from the middle of each side: bass left, treble right. Inspired by Paraline |
 
 Brightness adapts to each track by itself: every frequency band is scaled against its own recent
 maximum, so quiet and loud recordings both use the full range.
@@ -156,6 +166,14 @@ HyperHDR client and run anywhere.
 | `hyperhdr_sync/bridge.py`, `provider.py`, `setup_flow.py`, `settings.py` | The Music Assistant plugin |
 | `standalone/hyperhdr_bridge.py` | The standalone bridge |
 | `hyperhdr_sync_addon/`, `repository.yaml` | The Home Assistant add-on, which runs the standalone bridge |
+
+## Credits
+
+Flow, Centre pulse, Fireflies, Snowfall, Crystals, Braids, Embers, Aurora, Horizon and Side bars
+are our own takes on effect ideas from [Paraline](https://github.com/SamXop123/Paraline) by
+[SamXop123](https://github.com/SamXop123), a desktop audio visualizer that turns the edges of
+the screen into light. They are written for LED strips from Paraline's descriptions of its
+themes; no code is taken from Paraline, whose licence does not allow reuse.
 
 ## Support
 
