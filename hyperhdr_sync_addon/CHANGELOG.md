@@ -1,16 +1,20 @@
 # Changelog
 
-## 0.5.0
+## 0.5.1
 
-- Ten new effects, our own takes on ideas from [Paraline](https://github.com/SamXop123/Paraline)
-  by SamXop123 (written from its descriptions; no code taken): Flow, Centre pulse, Fireflies,
-  Snowfall, Crystals, Braids, Embers, Aurora, Horizon and Side bars.
 - The web UI always shows all effects, grouped by mood; "Show all" is gone.
 - The web UI shows the add-on version next to the status, so you can see which version runs.
 - When no music reaches the LEDs for a few seconds, the web UI shows a yellow "!" with what to
   do: in Music Assistant, open the player you listen on, choose Group members and tick the
   bridge's screen (named after the add-on's `name` option, "HyperHDR LEDs" by default). If
   the bridge cannot reach Music Assistant, it says that instead.
+
+## 0.5.0
+
+- Ten new effects, our own takes on ideas from [Paraline](https://github.com/SamXop123/Paraline)
+  by SamXop123 (written from its descriptions; no code taken): Flow, Centre pulse, Fireflies,
+  Snowfall, Crystals, Braids, Embers, Aurora, Horizon and Side bars. The web UI lists them
+  under their moods behind "Show all".
 - Intensity sets only the sensitivity, so 0 dB always shows as Normal, whatever the response
   under Fine-tuning.
 - The Ko-fi note sits at the top of the page instead of floating over the header. Closing it
