@@ -2,6 +2,11 @@
 
 ## 0.5.1
 
+- A new effect, Liquid: a picture that keeps zooming, twisting and fading into itself while the
+  music draws a ring on it, so trails spread out to the screen's edges. Our own effect in the
+  style of the MilkDrop visualizer; no MilkDrop code or presets are used.
+- A Random button next to Effect previews a different effect each time; Apply keeps it.
+- A Credits link at the bottom of the web UI opens a list of the projects HyperHDR Sync builds on.
 - The web UI always shows all effects, grouped by mood; "Show all" is gone.
 - The web UI shows the add-on version next to the status, so you can see which version runs.
 - When no music reaches the LEDs for a few seconds, the web UI shows a yellow "!" with what to

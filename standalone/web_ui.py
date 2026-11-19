@@ -109,6 +109,10 @@ EFFECT_LABELS = {
         "Side bars",
         "Bars growing from the middle of each side: bass left, treble right",
     ),
+    Effect.LIQUID: (
+        "Liquid",
+        "Swirling trails that zoom, twist and fade into themselves, like the MilkDrop visualizer",
+    ),
     Effect.MANUAL: ("Manual", "Every LED in the custom colour; does not follow the music"),
 }
 PALETTE_LABELS = {

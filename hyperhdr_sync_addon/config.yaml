@@ -42,7 +42,7 @@ schema:
   # no default: the add-on does not start until this is filled in
   hyperhdr_host: "str"
   name: "str"
-  effect: "list(spectrum|vu|pulse|ripple|scroll|energy|ambient|lumina|colora|retro|scanner|rhythm|party|manual|flow|centre_pulse|fireflies|snowfall|crystals|braids|embers|aurora|horizon|side_bars)"
+  effect: "list(spectrum|vu|pulse|ripple|scroll|energy|ambient|lumina|colora|retro|scanner|rhythm|party|manual|flow|centre_pulse|fireflies|snowfall|crystals|braids|embers|aurora|horizon|side_bars|liquid)"
   palette: "list(album|rainbow|sunset|ocean|fire|forest|neon|aurora|pastel|ice|candy|lava|warm|classic|custom|mine)"
   brightness: "int(0,100)"
   sensitivity: "float(-12,12)"
