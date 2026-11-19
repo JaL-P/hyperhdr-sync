@@ -33,8 +33,8 @@ today. The plugin needs a Music Assistant version that can load community provid
 4. In Music Assistant, group the new **HyperHDR LEDs** player with a speaker and play something.
 
 The default Sendspin address `ws://127.0.0.1:8927/sendspin` reaches a Music Assistant add-on on
-the same Home Assistant. Its folder is [`hyperhdr_sync_addon/`](hyperhdr_sync_addon); each
-add-on version installs the release tag of the same version.
+the same Home Assistant. Its folder is [`hyperhdr_sync_addon/`](hyperhdr_sync_addon); the
+add-on builds from the latest code on `main`, so no release tag is needed.
 
 ## Prepare HyperHDR
 

@@ -2,6 +2,8 @@
 
 ## 0.4.0
 
+- The add-on builds from the latest code on `main` instead of a release tag of the same
+  version, so updates install as soon as a change is merged.
 - A simpler web UI. It shows six popular effects first, with the rest behind "Show all"
   and grouped by mood; each effect's description sits behind an info button.
 - Colours start with where they come from (Album cover, Palette or Your colour), and only the
