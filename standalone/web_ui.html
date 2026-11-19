@@ -85,6 +85,9 @@
   .seg button { border: 0; background: transparent; color: var(--muted); border-radius: 7px; padding: 5px 12px; font-size: 13px; cursor: pointer; }
   .seg button[aria-pressed="true"], .seg button[aria-checked="true"] { background: var(--card); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }
   .seg.icons button { width: 32px; height: 30px; padding: 0; display: grid; place-items: center; }
+  .seg.steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .seg.steps button { padding: 7px 4px; text-align: center; }
+  @media (max-width: 360px) { .seg.steps button { font-size: 12px; } }
   .seg.icons svg { width: 15px; height: 15px; }
 
   .grid { display: grid; gap: 16px; align-items: start; }
@@ -307,6 +310,11 @@
         <div class="section-head"><h2 class="label" id="brightness-label">Brightness</h2><p class="hint">On top of HyperHDR's own brightness</p></div>
         <div class="slider"><input type="range" id="brightness" step="1" aria-labelledby="brightness-label"><output class="readout" for="brightness" id="brightness-out"></output></div>
       </section>
+      <section aria-labelledby="intensity-label">
+        <div class="section-head"><h2 class="label" id="intensity-label">Intensity</h2><p class="hint">How strongly the lights react to the music</p></div>
+        <div class="seg steps" id="intensity" role="radiogroup" aria-labelledby="intensity-label"></div>
+        <p class="hint" id="intensity-hint"></p>
+      </section>
       <section aria-labelledby="idle-label">
         <h2 class="label" id="idle-label">When the music stops</h2>
         <div class="switch-row">
@@ -367,6 +375,14 @@
 (() => {
   const KEYS = ["effect", "palette", "brightness", "sensitivity", "response", "latency_ms", "color",
     "night_light", "album_mode", "colors", "steps", "my_palettes"];
+  // Intensity: each step sets sensitivity (dB) and response together; Fine-tuning sets them exactly.
+  const INTENSITY = [
+    ["subtle", "Subtle", -8, "smooth", "Soft, slow changes; only the loudest moments stand out."],
+    ["gentle", "Gentle", -4, "smooth", "Calmer than normal, with smooth fades."],
+    ["normal", "Normal", 0, "balanced", "The lights follow the music as it is."],
+    ["lively", "Lively", 4, "snappy", "Brighter reactions and quicker drops after each beat."],
+    ["intense", "Intense", 8, "snappy", "Every beat and change hits hard. Lower it if the lights stay bright."],
+  ];
   const NAMES = {
     effect: "effect", palette: "colours", brightness: "brightness", sensitivity: "sensitivity",
     response: "response", latency_ms: "latency", color: "your colour", night_light: "glow",
@@ -846,6 +862,19 @@
     $("modes").hidden = !glow;
     if (!glow) ui.mode = "music";
     for (const button of $("modes").children) button.setAttribute("aria-pressed", String(button.dataset.mode === ui.mode));
+    const steps = $("intensity");
+    steps.replaceChildren();
+    const level = INTENSITY.find(([, , db, response]) => p.sensitivity === db && p.response === response);
+    for (const [id, label, db, response] of INTENSITY) {
+      const b = el("button", { type: "button", textContent: label, id: `intensity-${id}` });
+      b.setAttribute("role", "radio");
+      radio(b, level !== undefined && level[0] === id);
+      b.addEventListener("click", () => setPending({ sensitivity: db, response }, { keepFocus: b.id }));
+      steps.append(b);
+    }
+    $("intensity-hint").textContent = level
+      ? level[4]
+      : `Custom: ${formatValue("sensitivity", p.sensitivity)}, ${p.response} response, set under Fine-tuning.`;
     const responses = $("responses");
     responses.replaceChildren();
     for (const r of ui.responses) {
