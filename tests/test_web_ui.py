@@ -145,6 +145,9 @@ async def test_page_state_and_apply() -> None:
         assert len(state["leds"]["x"]) == 12
         assert state["settings"]["effect"] == "spectrum"
         assert state["saves"] is False
+        assert state["playing"] is False
+        assert state["source"] == "connecting"
+        assert state["player"] == "HyperHDR LEDs"
         assert {p["id"] for p in state["palettes"]} == {p.value for p in Palette} - {"mine"}
         assert {m["id"] for m in state["album_modes"]} == {m.value for m in AlbumMode}
         assert all(len(p["colors"]) >= 2 for p in state["palettes"])
@@ -193,6 +196,39 @@ async def test_preview_streams_without_touching_the_leds() -> None:
         async with asyncio.timeout(5):
             while bridge.preview is not None:  # noqa: ASYNC110
                 await asyncio.sleep(0.02)
+    finally:
+        await client.close()
+
+
+async def test_every_page_hears_the_status() -> None:
+    """Each page learns whether music plays and the player's name, also one opened later."""
+    layout = LedLayout.strip(12)
+    bridge = bridge_module.Bridge(Engine(layout), _NullSender(), 120, name="Lounge LEDs")
+    bridge.source = "connected"
+    client = await _client(web_ui.WebUi(bridge, bridge_module.demo_features))
+
+    async def status(ws: Any) -> dict[str, Any]:
+        async with asyncio.timeout(5):
+            while (message := await ws.receive()).type != aiohttp.WSMsgType.TEXT:
+                pass
+        data: dict[str, Any] = message.json()
+        return data
+
+    try:
+        first = await client.ws_connect("/api/ws")
+        heard = await status(first)
+        assert (heard["playing"], heard["source"], heard["player"]) == (
+            False,
+            "connected",
+            "Lounge LEDs",
+        )
+        second = await client.ws_connect("/api/ws")
+        assert (await status(second))["player"] == "Lounge LEDs"
+        bridge.streaming = True
+        assert (await status(first))["playing"] is True
+        assert (await status(second))["playing"] is True
+        await first.close()
+        await second.close()
     finally:
         await client.close()
 

@@ -24,6 +24,8 @@
     --accent-soft: rgba(196, 106, 8, 0.1);
     --good: #1d8a52;
     --bad: #c8382b;
+    --warn: #e8a800;
+    --warn-text: #7a5600;
     --wall: #090a0e;
     --glow-strength: 0.12;
     --shadow: 0 24px 60px -36px rgba(30, 34, 52, 0.35);
@@ -39,7 +41,7 @@
       --bg: #0b0c11; --card: #13151b; --card-soft: rgba(19, 21, 27, 0.78); --text: #eeebe4;
       --muted: #9497a3; --line: #252832; --chip: #1d2028; --chip-hover: #262a33; --input: #363a46;
       --accent: #ffc46b; --accent-text: #1f1405; --accent-soft: rgba(255, 196, 107, 0.09);
-      --good: #57c98c; --bad: #f06a5d; --wall: #06070a; --glow-strength: 0.17;
+      --good: #57c98c; --bad: #f06a5d; --warn: #f5c400; --warn-text: #f5d36b; --wall: #06070a; --glow-strength: 0.17;
       --shadow: 0 30px 80px -40px rgba(0, 0, 0, 0.9);
       color-scheme: dark;
     }
@@ -48,7 +50,7 @@
     --bg: #0b0c11; --card: #13151b; --card-soft: rgba(19, 21, 27, 0.78); --text: #eeebe4;
     --muted: #9497a3; --line: #252832; --chip: #1d2028; --chip-hover: #262a33; --input: #363a46;
     --accent: #ffc46b; --accent-text: #1f1405; --accent-soft: rgba(255, 196, 107, 0.09);
-    --good: #57c98c; --bad: #f06a5d; --wall: #06070a; --glow-strength: 0.17;
+    --good: #57c98c; --bad: #f06a5d; --warn: #f5c400; --warn-text: #f5d36b; --wall: #06070a; --glow-strength: 0.17;
     --shadow: 0 30px 80px -40px rgba(0, 0, 0, 0.9);
     color-scheme: dark;
   }
@@ -79,6 +81,11 @@
   .pill.playing { color: var(--good); }
   .pill.playing .dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent); }
   .pill.offline { color: var(--bad); }
+  .pill.waiting { color: var(--warn-text); }
+  .pill .bang, .warn .bang { display: none; flex: none; place-items: center; border-radius: 50%; background: var(--warn); color: #1f1600; font-weight: 800; line-height: 1; }
+  .pill .bang { width: 16px; height: 16px; font-size: 11px; }
+  .pill.waiting .bang { display: grid; }
+  .pill.waiting .dot { display: none; }
   .readout { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 12px; letter-spacing: 0.02em; }
   header .readout { margin-left: auto; color: var(--muted); }
   .seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: 9px; background: var(--chip); }
@@ -243,6 +250,15 @@
     box-shadow: 0 12px 32px -18px rgba(0, 0, 0, 0.6);
   }
   .notice.err { border-color: color-mix(in srgb, var(--bad) 45%, transparent); color: var(--bad); }
+  /* Shown while no music reaches the LEDs: how to get it there. */
+  .warn {
+    display: flex; align-items: flex-start; gap: 12px; margin: 0 0 12px; padding: 12px 16px; border-radius: 12px;
+    border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
+    background: color-mix(in srgb, var(--warn) 12%, var(--card)); font-size: 14px; line-height: 1.45;
+  }
+  .warn .bang { display: grid; width: 24px; height: 24px; font-size: 15px; margin-top: -1px; }
+  .warn p { margin: 0; }
+  .warn strong { color: var(--warn-text); }
   .support-toast a { color: var(--accent); font-weight: 600; }
   .support-toast .close { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
   .support-toast .close:hover { background: var(--chip); color: var(--text); }
@@ -259,6 +275,7 @@
 
 <div class="page">
   <p class="notice" id="notice" role="status" aria-live="polite" hidden></p>
+  <div class="warn" id="warn" role="status" hidden><span class="bang" aria-hidden="true">!</span><p id="warn-text"></p></div>
   <div class="support-toast" id="support-toast" hidden>
     <span>Have some spare cash and want to support me then <a href="https://ko-fi.com/jalp_" target="_blank" rel="noopener">buy me a Coffee</a></span>
     <label class="never" for="support-never"><input type="checkbox" id="support-never">Don't show this again</label>
@@ -266,7 +283,7 @@
   </div>
   <header>
     <h1>HyperHDR Sync</h1>
-    <span class="pill" id="status"><span class="dot"></span><span id="status-text">Connecting…</span></span>
+    <span class="pill" id="status"><span class="dot"></span><span class="bang" aria-hidden="true">!</span><span id="status-text">Connecting…</span></span>
     <span class="readout" id="count"></span>
     <div class="seg icons" id="themes" role="radiogroup" aria-label="Theme">
       <button type="button" role="radio" data-theme="system" aria-label="Follow the system" title="Follow the system"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></button>
@@ -296,7 +313,6 @@
       <section aria-labelledby="effect-label">
         <div class="section-head"><h2 class="label" id="effect-label">Effect</h2><p class="hint" id="effect-hint"></p></div>
         <div id="effects"></div>
-        <button type="button" class="link" id="more-effects"></button>
       </section>
       <section aria-labelledby="colours-label">
         <div class="section-head"><h2 class="label" id="colours-label">Colours</h2><p class="hint" id="colours-hint"></p></div>
@@ -401,14 +417,13 @@
     album_mode: "artwork colours", colors: "palette colours", steps: "palette style", my_palettes: "saved palettes",
   };
   const SLIDERS = ["brightness", "sensitivity", "latency_ms", "night_light"];
-  // Mood of every effect, and the six shown before "Show all".
+  // Every effect, grouped by mood; all of them are always shown.
   const MOODS = [
     ["calm", "Calm", ["lumina", "ambient", "colora", "aurora", "braids", "embers", "snowfall", "manual"]],
     ["beat", "On the beat", ["rhythm", "party", "pulse", "ripple", "scanner", "flow", "centre_pulse", "fireflies", "horizon"]],
     ["sound", "Shows the sound", ["spectrum", "retro", "vu", "energy", "scroll", "side_bars", "crystals"]],
   ];
   const MOOD_HINTS = { calm: "Gentle light that follows the mood", beat: "Moves with the rhythm", sound: "Draws bass, mids and treble" };
-  const FEATURED = ["lumina", "ambient", "rhythm", "party", "spectrum", "retro"];
   const PRESETS = [
     ["#ff9329", "Warm white"], ["#fff4e5", "Soft white"], ["#ffffff", "Cool white"],
     ["#ff3b1f", "Red"], ["#ff8a00", "Amber"], ["#2bff6a", "Green"],
@@ -419,9 +434,12 @@
   const $ = (id) => document.getElementById(id);
   const ui = {
     leds: null, applied: null, pending: null, palettes: [], effects: [], albumModes: [], responses: [],
-    ranges: {}, playing: false, connected: false, message: null, mode: "music", allEffects: false,
+    ranges: {}, playing: false, connected: false, message: null, mode: "music",
     editor: null, lastGlow: 30, preview: null, info: null,
+    source: "connecting", player: "HyperHDR LEDs", stoppedAt: 0,
   };
+  // How long the music may pause (between tracks, a skip) before the page says nothing reaches the LEDs.
+  const QUIET_MS = 5000;
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const el = (tag, props = {}, children = []) => {
     const node = Object.assign(document.createElement(tag), props);
@@ -609,22 +627,14 @@
       if (open) box.append(el("p", { className: "tip", id: `effect-${id}-tip`, textContent: e.description }));
       return box;
     };
-    const showAll = ui.allEffects || !FEATURED.includes(p.effect);
     const box = $("effects");
     box.replaceChildren();
-    if (showAll) {
-      for (const [, title, ids] of MOODS) {
-        box.append(el("p", { className: "mood", textContent: title }), el("div", { className: "tiles" }, ids.map(tile).filter(Boolean)));
-      }
-      const known = new Set(MOODS.flatMap((m) => m[2]));
-      const others = ui.effects.filter((e) => !known.has(e.id)).map((e) => tile(e.id));
-      if (others.length) box.append(el("p", { className: "mood", textContent: "More" }), el("div", { className: "tiles" }, others));
-    } else {
-      box.append(el("div", { className: "tiles" }, FEATURED.map(tile).filter(Boolean)));
+    for (const [, title, ids] of MOODS) {
+      box.append(el("p", { className: "mood", textContent: title }), el("div", { className: "tiles" }, ids.map(tile).filter(Boolean)));
     }
-    const more = $("more-effects");
-    more.hidden = !FEATURED.includes(p.effect);
-    more.textContent = ui.allEffects ? "Show fewer effects" : `Show all ${ui.effects.length} effects`;
+    const known = new Set(MOODS.flatMap((m) => m[2]));
+    const others = ui.effects.filter((e) => !known.has(e.id)).map((e) => tile(e.id));
+    if (others.length) box.append(el("p", { className: "mood", textContent: "More" }), el("div", { className: "tiles" }, others));
     const mood = MOODS.find((m) => m[2].includes(p.effect));
     $("effect-hint").textContent = p.effect === "manual" ? "Ignores the music" : mood ? MOOD_HINTS[mood[0]] : "";
   }
@@ -913,9 +923,35 @@
     $("reset").hidden = !changed.length;
     $("apply").hidden = !changed.length;
     $("bar-status").replaceChildren(el("b", { textContent: "Not applied yet: " }), changed.map((k) => NAMES[k]).join(", "));
+    const quiet = ui.connected && !ui.playing && ui.source !== "demo" && Date.now() - ui.stoppedAt >= QUIET_MS;
+    const warn = $("warn");
+    warn.hidden = !quiet;
+    if (quiet) {
+      const player = el("strong", { textContent: ui.player });
+      $("warn-text").replaceChildren(...(ui.source === "connected"
+        ? ["No music is reaching your LEDs. In Music Assistant, open the player you are listening on, choose ",
+           el("strong", { textContent: "Group members" }), " and tick the ", player, " screen."]
+        : ["Waiting for Music Assistant. Check that it is running and that the Music Assistant Sendspin address is right; ",
+           player, " shows up in Music Assistant once it connects."]));
+    }
     const pill = $("status");
-    pill.className = "pill" + (!ui.connected ? " offline" : ui.playing ? " playing" : "");
-    $("status-text").textContent = !ui.connected ? "Reconnecting…" : ui.playing ? "Music playing" : "No music playing";
+    pill.className = "pill" + (!ui.connected ? " offline" : ui.playing ? " playing" : quiet ? " waiting" : "");
+    $("status-text").textContent = !ui.connected ? "Reconnecting…" : ui.playing ? "Music playing"
+      : ui.source === "connecting" ? "Not connected to Music Assistant" : "No music playing";
+  }
+
+  // Note when the music stops, and check again once the pause has lasted long enough to mention.
+  let quietTimer = null;
+  function setStatus(data, { startup } = {}) {
+    if (ui.playing && !data.playing) {
+      ui.stoppedAt = Date.now();
+      clearTimeout(quietTimer);
+      quietTimer = setTimeout(render, QUIET_MS + 50);
+    }
+    if (startup && !data.playing) ui.stoppedAt = 0;
+    ui.playing = data.playing;
+    if (data.source) ui.source = data.source;
+    if (data.player) ui.player = data.player;
   }
 
   function setPending(change, { keepFocus } = {}) {
@@ -945,7 +981,7 @@
       if (typeof event.data === "string") {
         const data = JSON.parse(event.data);
         if (data.type === "status") {
-          ui.playing = data.playing;
+          setStatus(data);
           if (data.palettes) ui.palettes = data.palettes;
           if (data.album_modes) ui.albumModes = data.album_modes;
           if (!document.activeElement || document.activeElement.type !== "color") render();
@@ -1001,7 +1037,7 @@
     ui.leds = state.leds;
     ui.applied = state.settings;
     ui.pending = structuredClone(state.settings);
-    ui.playing = state.playing;
+    setStatus(state, { startup: true });
     ui.effects = state.effects;
     ui.palettes = state.palettes;
     ui.albumModes = state.album_modes;
@@ -1030,7 +1066,6 @@
       button.addEventListener("click", () => { ui.mode = button.dataset.mode; sendPreview(); render(); });
     }
     for (const button of $("themes").children) button.addEventListener("click", () => setTheme(button.dataset.theme));
-    $("more-effects").addEventListener("click", () => { ui.allEffects = !ui.allEffects; render(); });
     $("apply").addEventListener("click", apply);
     $("reset").addEventListener("click", () => {
       ui.pending = structuredClone(ui.applied);

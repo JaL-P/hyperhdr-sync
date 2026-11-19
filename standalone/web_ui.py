@@ -399,7 +399,7 @@ class WebUi:
                     "palette_colors": PALETTE_COLORS_RANGE,
                     "my_palettes": (0, MAX_MY_PALETTES),
                 },
-                "playing": self._bridge.streaming,
+                **self._status(),
                 "saves": self._saver is not None,
             }
         )
@@ -478,6 +478,7 @@ class WebUi:
         start = last = time.perf_counter()
         last_beat = -1
         status: dict[str, Any] | None = None
+        told: set[web.WebSocketResponse] = set()
         while self._clients:
             await asyncio.sleep(period)
             now = time.perf_counter()
@@ -505,17 +506,27 @@ class WebUi:
                 preview_rgb = idle.render(dt)
             # Read both at once, so the two pictures show the same moment.
             frame = self._bridge.last_rgb + preview_rgb
-            current = {"type": "status", "playing": self._bridge.streaming}
+            current = {"type": "status", **self._status()}
             current["palettes"] = self._palettes()
             current["album_modes"] = self._album_modes()
+            if current != status:
+                told.clear()
+                status = current
             for ws in list(self._clients):
                 with contextlib.suppress(ConnectionResetError, RuntimeError):
-                    if current != status:
+                    # Every page hears the status once, also one that opened later.
+                    if ws not in told:
                         await ws.send_json(current)
+                        told.add(ws)
                     await ws.send_bytes(frame)
-            status = current
+            told &= self._clients
 
     # --------------------------------------------------------------- helpers
+
+    def _status(self) -> dict[str, Any]:
+        """Return whether music plays, where it comes from and the player's name."""
+        bridge = self._bridge
+        return {"playing": bridge.streaming, "source": bridge.source, "player": bridge.name}
 
     def _set_preview(self, settings: EngineSettings) -> None:
         self._preview_settings = settings

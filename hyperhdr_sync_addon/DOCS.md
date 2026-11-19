@@ -19,6 +19,10 @@ preview changes straight away, following the music that is playing or a built-in
 your LEDs keep their current look. **Apply** puts the new settings on the LEDs and saves them in
 the add-on's configuration.
 
+A yellow **!** means no music reaches the LEDs. In Music Assistant, open the player you are
+listening on, choose **Group members** and tick the **HyperHDR LEDs** screen (the name set in
+the `name` option).
+
 ## Configuration
 
 - **HyperHDR address** (required): the IP address of the machine running HyperHDR.

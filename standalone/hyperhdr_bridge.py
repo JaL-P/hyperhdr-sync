@@ -85,6 +85,7 @@ class Bridge:
         sender: HyperHdrUdpSender,
         latency_ms: int,
         night_light: float = 0.0,
+        name: str = "HyperHDR LEDs",
     ) -> None:
         """
         Initialize the bridge.
@@ -94,8 +95,13 @@ class Bridge:
         :param latency_ms: How far ahead of the music the lights are rendered.
         :param night_light: Brightness (0..1) of the custom colour shown while no music
             plays; 0 hands the LEDs back to HyperHDR instead.
+        :param name: The player name shown in Music Assistant.
         """
         self.engine = engine
+        self.name = name
+        # Where the music comes from, for the web UI: "connecting" until Music Assistant
+        # answers, then "connected"; "demo" while the built-in test beat plays instead.
+        self.source = "connecting"
         self.sender = sender
         self.latency_us = latency_ms * 1000
         self.night_light = night_light
@@ -394,8 +400,10 @@ async def connect_loop(
                 "Connected to Music Assistant as '%s'. Group this player with a speaker there.",
                 args.name,
             )
+            bridge.source = "connected"
             await disconnected.wait()
             LOGGER.warning("Disconnected from Music Assistant, reconnecting")
+            bridge.source = "connecting"
             bridge.stop_stream()
             await asyncio.sleep(RECONNECT_INTERVAL_S)
     finally:
@@ -406,6 +414,7 @@ async def connect_loop(
 async def demo_loop(bridge: Bridge) -> None:
     """Drive the engine with a synthetic 120 BPM track, to test the LEDs without Music Assistant."""
     LOGGER.info("Demo mode: playing a built-in test beat on the LEDs (Ctrl+C to stop)")
+    bridge.source = "demo"
     period = 1.0 / RENDER_RATE_HZ
     start = last = time.perf_counter()
     last_beat = -1
@@ -480,7 +489,13 @@ async def run(args: argparse.Namespace) -> None:
             colors=args.colors,
             steps=args.steps,
         )
-        bridge = Bridge(Engine(layout, settings), sender, args.latency_ms, args.night_light / 100.0)
+        bridge = Bridge(
+            Engine(layout, settings),
+            sender,
+            args.latency_ms,
+            args.night_light / 100.0,
+            name=args.name,
+        )
         # Stop as cleanly on SIGTERM (a service or container stopping) as on Ctrl+C.
         task = asyncio.current_task()
         if task is not None and hasattr(signal, "SIGTERM"):
