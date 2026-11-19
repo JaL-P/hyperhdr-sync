@@ -33,6 +33,16 @@
         "scanner": "Scanner: a light sweeping back and forth, faster when louder",
         "rhythm": "Rhythm: colour blocks that swap on every beat",
         "party": "Party: random colour bursts on beats",
+        "flow": "Flow: comets of light circling the screen, faster when louder",
+        "centre_pulse": "Centre pulse: every beat sends a pulse from the middle of each edge to the corners",
+        "fireflies": "Fireflies: small lights drifting around the screen; beats speed them up",
+        "snowfall": "Snowfall: glowing flakes falling down the sides, more with the treble",
+        "crystals": "Crystals: shards that flare with their own frequency and flutter with the treble",
+        "braids": "Braids: two strands of colour winding along the sides, crossing as they move",
+        "embers": "Embers: a flickering glow with sparks rising from the bottom on the bass",
+        "aurora": "Aurora: slow, folded curtains of colour rising from the bottom",
+        "horizon": "Horizon: a sun at the top pulsing with the bass, grid lines rushing down the sides",
+        "side_bars": "Side bars: bars growing from the middle of each side: bass left, treble right",
         "manual": "Manual: every LED in the custom colour, not following the music"
       }
     },

@@ -66,6 +66,8 @@ _CONTRAST: float = 1.5
 _LUT_SIZE: int = 256
 _SCROLL_LENGTH: int = 96
 _MAX_RIPPLES: int = 10
+# Most flakes, sparks and fireflies drawn at once.
+_MAX_PARTICLES: int = 48
 
 
 class Effect(StrEnum):
@@ -92,6 +94,28 @@ class Effect(StrEnum):
     """Random colour bursts on beats, sparkles on the treble."""
     MANUAL = "manual"
     """One fixed colour on every LED; does not follow the music."""
+    # Our own LED takes on effect ideas from Paraline (https://github.com/SamXop123/Paraline)
+    # by SamXop123: written from its descriptions, with no code taken from it.
+    FLOW = "flow"
+    """Comets of light circling the screen; faster when louder, strong beats turn them round."""
+    CENTRE_PULSE = "centre_pulse"
+    """Each beat sends a pulse from the middle of every edge out to the corners."""
+    FIREFLIES = "fireflies"
+    """Small lights drifting around the screen; beats give them a burst of speed."""
+    SNOWFALL = "snowfall"
+    """Glowing flakes falling down the sides of the screen; more with the treble."""
+    CRYSTALS = "crystals"
+    """Short shards that flare with their own frequency band and flutter with the treble."""
+    BRAIDS = "braids"
+    """Two strands of colour winding along the sides, crossing as they move."""
+    EMBERS = "embers"
+    """A flickering glow with sparks rising from the bottom on the bass."""
+    AURORA = "aurora"
+    """Slow, folded curtains of colour rising from the bottom, taller when louder."""
+    HORIZON = "horizon"
+    """A sun at the top pulsing with the bass, grid lines rushing down the sides."""
+    SIDE_BARS = "side_bars"
+    """Bars growing from the middle of each side: bass on the left, treble on the right."""
 
 
 class AlbumMode(StrEnum):
@@ -250,6 +274,22 @@ class Engine:
         # 0 in the middle of a Retro block, 1 at its ends.
         self._retro_offset = (np.abs(retro_at - self._retro_block - 0.5) * 2.0).astype(np.float32)
         self._retro_leds = count / _RETRO_BANDS
+        # Which edge each LED is on (0 left, 1 right, 2 top, 3 bottom), how far it is from
+        # that edge's middle (0) towards its corners (1), and its height (0 bottom, 1 top).
+        x, y = layout.x.astype(np.float32), layout.y.astype(np.float32)
+        self._edge = np.argmin(np.stack([x, 1.0 - x, y, 1.0 - y]), axis=0).astype(np.intp)
+        along = np.where(self._edge < 2, y, x)
+        self._from_mid = np.clip(np.abs(along - 0.5) * 2.0, 0.0, 1.0).astype(np.float32)
+        self._height = (1.0 - y).astype(np.float32)
+        self._side = self._edge < 2
+        # Crystals: fixed shards around the screen, each tied to one frequency band.
+        shards = max(4, count // 14)
+        shard_rng = np.random.default_rng(11)
+        self._shard_at = (
+            (np.arange(shards) + 0.2 + 0.6 * shard_rng.random(shards)) / shards
+        ).astype(np.float32)
+        self._shard_band = (np.arange(shards) * 7) % SPECTRUM_BINS
+        self._shard_color = shard_rng.random(shards).astype(np.float32)
         self._album_colors: tuple[_RGB, ...] = ()
         self._lut_linear = np.zeros((_LUT_SIZE, 3), np.float32)
         self._lut_cyclic = np.zeros((_LUT_SIZE, 3), np.float32)
@@ -329,11 +369,37 @@ class Engine:
         self._scan_trail = np.zeros((count, 3), np.float32)
         self._rhythm_step = 0
         self._party = np.zeros((count, 3), np.float32)
+        self._reset_paraline_effects()
         # ``_time`` and ``_hue`` are deliberately kept so colours do not jump on a seek.
         if not hasattr(self, "_time"):
             self._time = 0.0
             self._hue = 0.0
             self._ambient_phase = 0.0
+
+    def _reset_paraline_effects(self) -> None:
+        """Reset the state of the effects inspired by Paraline (flow, fireflies, snowfall ...)."""
+        count = self.layout.count
+        self._flow_pos = 0.0
+        self._flow_dir = 1.0
+        self._centre_pulses: list[list[float]] = []
+        flies = min(_MAX_PARTICLES // 2, max(6, count // 10))
+        self._fly_pos = self._rng.random(flies).astype(np.float32)
+        self._fly_speed = (
+            (0.02 + 0.04 * self._rng.random(flies)) * self._rng.choice([-1, 1], flies)
+        ).astype(np.float32)
+        self._fly_color = self._rng.random(flies).astype(np.float32)
+        self._fly_boost = 0.0
+        # Particles as rows: side (0 left, 1 right; -1 both), height, speed, colour, life.
+        self._flakes = np.zeros((0, 5), np.float32)
+        self._sparks = np.zeros((0, 5), np.float32)
+        self._spawn = 0.0
+        self._shard_flare = np.zeros(len(self._shard_at), np.float32)
+        self._ember = self._rng.random(count).astype(np.float32)
+        self._braid_phase = 0.0
+        self._aurora_phase = 0.0
+        self._aurora_height = 0.3
+        self._aurora_glow = 0.0
+        self._horizon_phase = 0.0
 
     def feed(
         self,
@@ -397,6 +463,16 @@ class Engine:
             Effect.RHYTHM: self._fx_rhythm,
             Effect.PARTY: lambda: self._fx_party(dt),
             Effect.MANUAL: lambda: self._solid(1.0),
+            Effect.FLOW: lambda: self._fx_flow(dt),
+            Effect.CENTRE_PULSE: lambda: self._fx_centre_pulse(dt),
+            Effect.FIREFLIES: lambda: self._fx_fireflies(dt),
+            Effect.SNOWFALL: lambda: self._fx_snowfall(dt),
+            Effect.CRYSTALS: lambda: self._fx_crystals(dt),
+            Effect.BRAIDS: lambda: self._fx_braids(dt),
+            Effect.EMBERS: lambda: self._fx_embers(dt),
+            Effect.AURORA: lambda: self._fx_aurora(dt),
+            Effect.HORIZON: lambda: self._fx_horizon(dt),
+            Effect.SIDE_BARS: self._fx_side_bars,
         }
         frame = effects[self.settings.effect]()
         # Manual is a fixed light: it stays on through quiet passages.
@@ -697,6 +773,243 @@ class Engine:
             where = self._rng.integers(0, count, sparkles)
             self._party[where] = _sample_wrap(self._lut_cyclic, self._rng.random(sparkles))
         return self._party
+
+    # Our own takes on effect ideas from Paraline (https://github.com/SamXop123/Paraline) by
+    # SamXop123, made for a strip of LEDs: written from its descriptions, no code taken.
+
+    def _fx_flow(self, dt: float) -> np.ndarray:
+        """
+        Three comets with fading tails circling the screen; louder is faster.
+
+        :param dt: Seconds since the previous frame.
+        """
+        if self._new_beat > 0.85:
+            self._flow_dir = -self._flow_dir
+        self._flow_pos = (self._flow_pos + self._flow_dir * (0.05 + 0.45 * self._level) * dt) % 1.0
+        tail = 0.08 + 0.1 * self._bass
+        frame = np.zeros((self.layout.count, 3), np.float32)
+        for comet in range(3):
+            head = (self._flow_pos + comet / 3.0) % 1.0
+            behind = ((head - self._ring) * self._flow_dir) % 1.0  # 0 at the head, growing behind
+            shape = np.where(behind < 0.3, np.exp(-behind / tail), 0.0)
+            color = _sample_one(self._lut_cyclic, (self._hue + comet / 3.0) % 1.0)
+            frame += color * (shape * (0.35 + 0.65 * self._level))[:, None]
+        return frame
+
+    def _fx_centre_pulse(self, dt: float) -> np.ndarray:
+        """
+        On each beat a pulse leaves the middle of every edge and runs out to its corners.
+
+        :param dt: Seconds since the previous frame.
+        """
+        if self._new_beat > 0.0:
+            self._centre_pulses.append([-0.05, self._new_beat, self._hue])
+            del self._centre_pulses[:-_MAX_RIPPLES]
+        frame = _sample_wrap(self._lut_cyclic, self._hue + self._from_mid * 0.2) * (
+            0.04 * self._level
+        )
+        fade = math.exp(-dt / 0.6)
+        for pulse in self._centre_pulses:
+            pulse[0] += 1.3 * dt
+            pulse[1] *= fade
+            shape = np.exp(-(((self._from_mid - pulse[0]) / 0.07) ** 2)) * pulse[1]
+            frame = frame + _sample_one(self._lut_cyclic, pulse[2]) * shape[:, None]
+        self._centre_pulses = [p for p in self._centre_pulses if p[0] < 1.2 and p[1] > 0.02]
+        return frame
+
+    def _fx_fireflies(self, dt: float) -> np.ndarray:
+        """
+        Small lights drifting around the screen; a beat speeds them up and may turn them.
+
+        :param dt: Seconds since the previous frame.
+        """
+        if self._new_beat > 0.0:
+            self._fly_boost = 1.0 + 3.0 * self._new_beat
+            turn = self._rng.random(len(self._fly_speed)) < 0.35
+            self._fly_speed[turn] = -self._fly_speed[turn]
+        self._fly_boost = 1.0 + (self._fly_boost - 1.0) * math.exp(-dt / 0.35)
+        speed = self._fly_speed * self._fly_boost * (0.5 + self._level)
+        self._fly_pos = ((self._fly_pos + speed * dt) % 1.0).astype(np.float32)
+        width = 1.4 / max(self.layout.count, 1)
+        gap = np.abs((self._ring[:, None] - self._fly_pos[None, :] + 0.5) % 1.0 - 0.5)
+        shape = np.exp(-((gap / width) ** 2))
+        twinkle = 0.55 + 0.45 * np.sin(self._time * 3.0 + self._fly_color * 40.0)
+        colors = (
+            _sample_wrap(self._lut_cyclic, self._fly_color)
+            * (twinkle * (0.4 + 0.6 * self._level))[:, None]
+        )
+        frame: np.ndarray = (shape @ colors).astype(np.float32)
+        return frame
+
+    def _fx_snowfall(self, dt: float) -> np.ndarray:
+        """
+        Glowing flakes fall down the left and right sides; the treble brings more of them.
+
+        :param dt: Seconds since the previous frame.
+        """
+        self._spawn += dt * (0.8 + 6.0 * self._treble + 3.0 * self._pulse)
+        new = int(self._spawn)
+        if new:
+            self._spawn -= new
+            rows = np.column_stack(
+                [
+                    self._rng.integers(0, 2, new),
+                    np.ones(new),
+                    0.12 + 0.25 * self._rng.random(new),
+                    self._rng.random(new),
+                    np.ones(new),
+                ]
+            ).astype(np.float32)
+            self._flakes = np.vstack([self._flakes, rows])[-_MAX_PARTICLES:]
+        flakes = self._flakes
+        flakes[:, 1] -= flakes[:, 2] * dt * (0.6 + 0.8 * self._level)
+        self._flakes = flakes = flakes[flakes[:, 1] > -0.05]
+        frame = np.zeros((self.layout.count, 3), np.float32)
+        if len(flakes):
+            on_side = self._edge[:, None] == flakes[None, :, 0].astype(np.intp)
+            shape = np.exp(-(((self._height[:, None] - flakes[None, :, 1]) / 0.035) ** 2)) * on_side
+            colors = _sample(self._lut_linear, 0.55 + 0.45 * flakes[:, 3]) * 0.9
+            frame = (shape @ colors).astype(np.float32)
+        # A faint glow along the top, where the flakes come from.
+        top = (self._edge == 2).astype(np.float32) * (0.05 + 0.1 * self._treble)
+        result: np.ndarray = frame + _sample_one(self._lut_linear, 1.0) * top[:, None]
+        return result
+
+    def _fx_crystals(self, dt: float) -> np.ndarray:
+        """
+        Flare fixed shards with their own frequency band and flutter them with the treble.
+
+        :param dt: Seconds since the previous frame.
+        """
+        levels = (
+            self._bands[self._shard_band]
+            if self._has_spectrum
+            else np.full(len(self._shard_at), self._level, np.float32)
+        )
+        rising = levels > self._shard_flare
+        self._shard_flare += (levels - self._shard_flare) * np.where(
+            rising, _alpha(dt, _ATTACK_TAU_S), _alpha(dt, 0.2)
+        )
+        flare = self._shard_flare**2
+        flutter = 1.0 - self._treble * 0.6 * self._rng.random(len(flare))
+        reach = (0.25 + 1.2 * flare) / len(self._shard_at) / 2.0  # half the shard's length
+        gap = np.abs((self._ring[:, None] - self._shard_at[None, :] + 0.5) % 1.0 - 0.5)
+        shape = np.clip(1.0 - gap / reach[None, :], 0.0, 1.0) ** 0.7
+        glint = (flare**2 * 0.6)[:, None]  # the brightest shards turn towards white
+        colors = _sample_wrap(self._lut_cyclic, self._shard_color) * (1.0 - glint) + glint
+        colors = colors * (flare * flutter)[:, None]
+        frame: np.ndarray = (shape @ colors).astype(np.float32)
+        return frame
+
+    def _fx_braids(self, dt: float) -> np.ndarray:
+        """
+        Two strands of colour wind along the sides in opposite directions, crossing as they go.
+
+        :param dt: Seconds since the previous frame.
+        """
+        self._braid_phase += dt * (0.15 + 0.6 * self._level_slow)
+        wave = 2.0 * math.pi * (self._pos * 2.5)
+        up = (0.5 + 0.5 * np.sin(wave - 2.0 * math.pi * self._braid_phase)) ** 4
+        down = (0.5 + 0.5 * np.sin(wave + 2.0 * math.pi * self._braid_phase + 1.3)) ** 4
+        value = 0.3 + 0.55 * self._level + 0.15 * self._pulse
+        frame: np.ndarray = (
+            _sample_one(self._lut_linear, 0.15) * up[:, None]
+            + _sample_one(self._lut_linear, 0.85) * down[:, None]
+        ) * value
+        return frame
+
+    def _fx_embers(self, dt: float) -> np.ndarray:
+        """
+        Glow warm and flickering, with sparks rising from the bottom on the bass.
+
+        :param dt: Seconds since the previous frame.
+        """
+        count = self.layout.count
+        drift = self._rng.normal(0.0, 1.0, count).astype(np.float32) * math.sqrt(dt) * 0.9
+        self._ember = np.clip(self._ember + drift, 0.0, 1.0)
+        glow = (0.08 + 0.22 * self._level_slow) * (0.4 + 0.6 * self._ember) * (1.2 - self._pos)
+        frame = _sample(self._lut_linear, 0.15 * self._ember)[:, :] * glow[:, None]
+        self._spawn += dt * (0.5 + 10.0 * self._kick + 4.0 * self._bass**2)
+        new = int(self._spawn)
+        if new:
+            self._spawn -= new
+            rows = np.column_stack(
+                [
+                    np.full(new, -1.0),
+                    self._rng.random(new) * 0.1,
+                    0.25 + 0.35 * self._rng.random(new),
+                    self._rng.random(new) * 0.4,
+                    self._rng.random(new) * 2.0 - 1.0,  # which side and where along it
+                ]
+            ).astype(np.float32)
+            self._sparks = np.vstack([self._sparks, rows])[-_MAX_PARTICLES:]
+        sparks = self._sparks
+        sparks[:, 1] += sparks[:, 2] * dt
+        self._sparks = sparks = sparks[sparks[:, 1] < 0.85]
+        if len(sparks):
+            # Sparks rise along the left (negative) or right half of the ring.
+            left = (self._ring < 0.5)[:, None] == (sparks[None, :, 4] < 0.0)
+            shape = np.exp(-(((self._pos[:, None] - sparks[None, :, 1]) / 0.03) ** 2)) * left
+            heat = 1.0 - sparks[:, 1] / 0.85
+            colors = _sample(self._lut_linear, sparks[:, 3]) * heat[:, None]
+            frame = frame + shape @ colors
+        result: np.ndarray = frame.astype(np.float32)
+        return result
+
+    def _fx_aurora(self, dt: float) -> np.ndarray:
+        """
+        Raise folded curtains of colour from the bottom; louder music lifts and brightens them.
+
+        :param dt: Seconds since the previous frame.
+        """
+        self._aurora_phase += dt * (0.04 + 0.08 * self._level_slow)
+        target = 0.3 + 0.6 * self._level_slow
+        self._aurora_height += (target - self._aurora_height) * _alpha(dt, 1.5)
+        # The curtains swell with the loudness, smoothed so they never flash.
+        self._aurora_glow += (self._level - self._aurora_glow) * _alpha(dt, 0.9)
+        rise = np.clip(1.0 - self._pos / self._aurora_height, 0.0, 1.0) ** 1.3
+        phase = 2.0 * math.pi * self._aurora_phase
+        folds = 0.55 + 0.45 * np.sin(2.0 * math.pi * 3.0 * self._ring + phase) * np.sin(
+            2.0 * math.pi * 5.0 * self._ring - phase * 0.7
+        )
+        at = self._ring * 0.35 + self._pos * 0.4 + self._aurora_phase * 0.5
+        value = rise * folds * (0.25 + 0.75 * self._aurora_glow)
+        frame: np.ndarray = _sample_wrap(self._lut_cyclic, at) * value[:, None]
+        return frame
+
+    def _fx_horizon(self, dt: float) -> np.ndarray:
+        """
+        Pulse a sun at top-centre with the bass; grid lines rush down the sides towards you.
+
+        :param dt: Seconds since the previous frame.
+        """
+        self._horizon_phase = (self._horizon_phase + dt * (0.25 + 0.9 * self._level)) % 1.0
+        sun_width = 0.18 + 0.1 * self._bass
+        sun = (self._edge == 2) * np.clip(1.0 - self._from_mid / (sun_width * 2.0), 0.0, 1.0)
+        sun_value = 0.35 + 0.65 * max(self._bass, self._pulse)
+        # Grid lines: evenly spaced in depth, so they bunch up near the horizon at the top.
+        lines = 6
+        depth = (self._height**0.5) * lines + self._horizon_phase
+        line = np.clip(1.0 - np.abs(depth - np.round(depth)) / 0.18, 0.0, 1.0)
+        grid = line * self._side * (0.25 + 0.6 * self._level) * (0.4 + 0.6 * (1.0 - self._height))
+        frame: np.ndarray = (
+            _sample_one(self._lut_linear, 0.05) * (sun * sun_value)[:, None]
+            + _sample_one(self._lut_linear, 0.8) * grid[:, None]
+        )
+        return frame
+
+    def _fx_side_bars(self) -> np.ndarray:
+        """Bars grow from the middle of each side: the bass on the left, the treble on the right."""
+        reach = np.where(self._edge == 0, self._bass, self._treble) * 1.05
+        lit = np.clip((reach - self._from_mid) / 0.08 + 0.5, 0.0, 1.0) * self._side
+        colors = _sample(
+            self._lut_linear, np.where(self._edge == 0, 0.0, 1.0) * 0.8 + self._from_mid * 0.2
+        )
+        top = (self._edge == 2) * (0.04 + 0.12 * self._mid)
+        frame: np.ndarray = (
+            colors * lit[:, None] + _sample_one(self._lut_linear, 0.5) * top[:, None]
+        )
+        return frame
 
     def _solid(self, level: float) -> np.ndarray:
         """Every LED in the custom colour at ``level``."""

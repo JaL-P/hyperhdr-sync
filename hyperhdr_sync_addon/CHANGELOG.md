@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+
+- Ten new effects, our own takes on ideas from [Paraline](https://github.com/SamXop123/Paraline)
+  by SamXop123 (written from its descriptions; no code taken): Flow, Centre pulse, Fireflies,
+  Snowfall, Crystals, Braids, Embers, Aurora, Horizon and Side bars. The web UI lists them
+  under their moods behind "Show all".
+
 ## 0.4.1
 
 - Intensity, under Brightness in the web UI: five steps from Subtle to Intense set how strongly

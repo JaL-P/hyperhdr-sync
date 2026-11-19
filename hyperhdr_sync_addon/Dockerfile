@@ -4,7 +4,7 @@ FROM ghcr.io/home-assistant/base-python:3.14-alpine3.24-2026.11.0
 # branch, so a merged change reaches the add-on without a release tag. Supervisor passes
 # config.yaml's version as BUILD_VERSION; it is part of the download step, so every new
 # add-on version downloads main afresh instead of reusing a cached copy.
-ARG BUILD_VERSION=0.4.1
+ARG BUILD_VERSION=0.5.0
 ARG BUILD_REF=main
 
 WORKDIR /app

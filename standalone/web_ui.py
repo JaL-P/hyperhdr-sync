@@ -83,6 +83,31 @@ EFFECT_LABELS = {
         "Ambient",
         "Calm colours turning around the screen; the music sets the speed, not the brightness",
     ),
+    Effect.FLOW: ("Flow", "Comets of light circling the screen, faster when louder"),
+    Effect.CENTRE_PULSE: (
+        "Centre pulse",
+        "Every beat sends a pulse from the middle of each edge to the corners",
+    ),
+    Effect.FIREFLIES: ("Fireflies", "Small lights drifting around the screen; beats speed them up"),
+    Effect.SNOWFALL: ("Snowfall", "Glowing flakes falling down the sides, more with the treble"),
+    Effect.CRYSTALS: (
+        "Crystals",
+        "Shards that flare with their own frequency and flutter with the treble",
+    ),
+    Effect.BRAIDS: (
+        "Braids",
+        "Two strands of colour winding along the sides, crossing as they move",
+    ),
+    Effect.EMBERS: ("Embers", "A flickering glow with sparks rising from the bottom on the bass"),
+    Effect.AURORA: ("Aurora", "Slow, folded curtains of colour rising from the bottom"),
+    Effect.HORIZON: (
+        "Horizon",
+        "A sun at the top pulsing with the bass, grid lines rushing down the sides",
+    ),
+    Effect.SIDE_BARS: (
+        "Side bars",
+        "Bars growing from the middle of each side: bass left, treble right",
+    ),
     Effect.MANUAL: ("Manual", "Every LED in the custom colour; does not follow the music"),
 }
 PALETTE_LABELS = {
