@@ -230,6 +230,19 @@
     background: var(--accent-soft); font-size: 13.5px;
   }
   .support-toast span { flex: 1; min-width: 0; }
+  .support-toast .never { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--muted); font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+  .support-toast .never input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+  @media (max-width: 560px) { .support-toast { flex-wrap: wrap; } .support-toast span { flex-basis: calc(100% - 44px); } }
+  /* Messages (applied, saved, errors): at the top, just above the Ko-fi note, and kept in view. */
+  .notice {
+    position: sticky; top: max(8px, calc(env(safe-area-inset-top, 0px) + 8px)); z-index: 25;
+    margin: 0 0 12px; padding: 10px 16px; border-radius: 12px; font-size: 14px; font-weight: 600;
+    border: 1px solid color-mix(in srgb, var(--good) 45%, transparent);
+    background: color-mix(in srgb, var(--card) 94%, transparent); color: var(--good);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 12px 32px -18px rgba(0, 0, 0, 0.6);
+  }
+  .notice.err { border-color: color-mix(in srgb, var(--bad) 45%, transparent); color: var(--bad); }
   .support-toast a { color: var(--accent); font-weight: 600; }
   .support-toast .close { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
   .support-toast .close:hover { background: var(--chip); color: var(--text); }
@@ -245,8 +258,10 @@
 <body>
 
 <div class="page">
-  <div class="support-toast" id="support-toast" role="status" hidden>
+  <p class="notice" id="notice" role="status" aria-live="polite" hidden></p>
+  <div class="support-toast" id="support-toast" hidden>
     <span>Have some spare cash and want to support me then <a href="https://ko-fi.com/jalp_" target="_blank" rel="noopener">buy me a Coffee</a></span>
+    <label class="never" for="support-never"><input type="checkbox" id="support-never">Don't show this again</label>
     <button type="button" class="close" id="support-close" aria-label="Close">×</button>
   </div>
   <header>
@@ -889,18 +904,15 @@
       ? `Glowing at ${p.night_light} % in your colour while no music plays`
       : changed.length ? "Preview of your changes. Apply to send them to the LEDs."
       : ui.playing ? "Showing what your LEDs do now" : "No music playing: the preview plays a test beat";
-    $("applybar").hidden = !changed.length && !ui.message;
+    $("applybar").hidden = !changed.length;
+    const notice = $("notice");
+    notice.hidden = !ui.message;
+    notice.className = "notice" + (ui.message && ui.message.kind === "err" ? " err" : "");
+    notice.textContent = ui.message ? ui.message.text : "";
     $("apply").disabled = !changed.length || !ui.connected;
     $("reset").hidden = !changed.length;
     $("apply").hidden = !changed.length;
-    const status = $("bar-status");
-    status.className = "status";
-    if (ui.message) {
-      status.textContent = ui.message.text;
-      status.classList.add(ui.message.kind);
-    } else {
-      status.replaceChildren(el("b", { textContent: "Not applied yet: " }), changed.map((k) => NAMES[k]).join(", "));
-    }
+    $("bar-status").replaceChildren(el("b", { textContent: "Not applied yet: " }), changed.map((k) => NAMES[k]).join(", "));
     const pill = $("status");
     pill.className = "pill" + (!ui.connected ? " offline" : ui.playing ? " playing" : "");
     $("status-text").textContent = !ui.connected ? "Reconnecting…" : ui.playing ? "Music playing" : "No music playing";
@@ -1034,11 +1046,12 @@
     requestAnimationFrame(frameLoop);
   }
   setTheme(recall("hyperhdr-sync-theme"));
-  // The support note shows until it is closed; closing it is remembered in this browser.
+  // The support note: × hides it until the page is opened again; with "Don't show this again"
+  // ticked, closing it is remembered in this browser.
   if (recall("hyperhdr-sync-support-closed") !== "1") $("support-toast").hidden = false;
   $("support-close").addEventListener("click", () => {
     $("support-toast").hidden = true;
-    store("hyperhdr-sync-support-closed", "1");
+    if ($("support-never").checked) store("hyperhdr-sync-support-closed", "1");
   });
   start();
 })();

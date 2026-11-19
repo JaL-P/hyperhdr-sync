@@ -8,7 +8,10 @@
   under their moods behind "Show all".
 - Intensity sets only the sensitivity, so 0 dB always shows as Normal, whatever the response
   under Fine-tuning.
-- The Ko-fi note sits at the top of the page instead of floating over the header.
+- The Ko-fi note sits at the top of the page instead of floating over the header. Closing it
+  hides it until the page is opened again; tick "Don't show this again" to hide it for good.
+- Messages such as "Applied to your LEDs" appear at the top of the page and stay in view; the
+  bar at the bottom only shows unapplied changes.
 
 ## 0.4.1
 
