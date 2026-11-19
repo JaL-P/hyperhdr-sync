@@ -6,6 +6,9 @@
   by SamXop123 (written from its descriptions; no code taken): Flow, Centre pulse, Fireflies,
   Snowfall, Crystals, Braids, Embers, Aurora, Horizon and Side bars. The web UI lists them
   under their moods behind "Show all".
+- Intensity sets only the sensitivity, so 0 dB always shows as Normal, whatever the response
+  under Fine-tuning.
+- The Ko-fi note sits at the top of the page instead of floating over the header.
 
 ## 0.4.1
 

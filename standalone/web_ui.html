@@ -225,14 +225,11 @@
   .btn.danger { color: var(--bad); }
   /* Support: a closable note at the top, and the Ko-fi card in the footer. */
   .support-toast {
-    position: fixed; z-index: 30; left: 50%; transform: translateX(-50%);
-    top: max(12px, calc(env(safe-area-inset-top, 0px) + 8px));
-    width: max-content; max-width: calc(100% - 32px);
-    display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px;
+    display: flex; align-items: center; gap: 10px; margin: 0 0 16px; padding: 8px 8px 8px 16px;
     border-radius: 14px; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-    background: color-mix(in srgb, var(--card) 94%, transparent); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-    box-shadow: 0 16px 40px -18px rgba(0, 0, 0, 0.55); font-size: 13.5px;
+    background: var(--accent-soft); font-size: 13.5px;
   }
+  .support-toast span { flex: 1; min-width: 0; }
   .support-toast a { color: var(--accent); font-weight: 600; }
   .support-toast .close { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
   .support-toast .close:hover { background: var(--chip); color: var(--text); }
@@ -246,12 +243,12 @@
 </style>
 </head>
 <body>
-<div class="support-toast" id="support-toast" role="status" hidden>
-  <span>Have some spare cash and want to support me then <a href="https://ko-fi.com/jalp_" target="_blank" rel="noopener">buy me a Coffee</a></span>
-  <button type="button" class="close" id="support-close" aria-label="Close">×</button>
-</div>
 
 <div class="page">
+  <div class="support-toast" id="support-toast" role="status" hidden>
+    <span>Have some spare cash and want to support me then <a href="https://ko-fi.com/jalp_" target="_blank" rel="noopener">buy me a Coffee</a></span>
+    <button type="button" class="close" id="support-close" aria-label="Close">×</button>
+  </div>
   <header>
     <h1>HyperHDR Sync</h1>
     <span class="pill" id="status"><span class="dot"></span><span id="status-text">Connecting…</span></span>
@@ -375,13 +372,13 @@
 (() => {
   const KEYS = ["effect", "palette", "brightness", "sensitivity", "response", "latency_ms", "color",
     "night_light", "album_mode", "colors", "steps", "my_palettes"];
-  // Intensity: each step sets sensitivity (dB) and response together; Fine-tuning sets them exactly.
+  // Intensity: each step sets the sensitivity (dB); Fine-tuning sets it exactly, with the response.
   const INTENSITY = [
-    ["subtle", "Subtle", -8, "smooth", "Soft, slow changes; only the loudest moments stand out."],
-    ["gentle", "Gentle", -4, "smooth", "Calmer than normal, with smooth fades."],
-    ["normal", "Normal", 0, "balanced", "The lights follow the music as it is."],
-    ["lively", "Lively", 4, "snappy", "Brighter reactions and quicker drops after each beat."],
-    ["intense", "Intense", 8, "snappy", "Every beat and change hits hard. Lower it if the lights stay bright."],
+    ["subtle", "Subtle", -8, "Soft and dim; only the loudest moments stand out."],
+    ["gentle", "Gentle", -4, "Calmer than normal."],
+    ["normal", "Normal", 0, "The lights follow the music as it is."],
+    ["lively", "Lively", 4, "Brighter, bigger reactions to the music."],
+    ["intense", "Intense", 8, "Every beat and change hits hard. Lower it if the lights stay bright."],
   ];
   const NAMES = {
     effect: "effect", palette: "colours", brightness: "brightness", sensitivity: "sensitivity",
@@ -864,17 +861,17 @@
     for (const button of $("modes").children) button.setAttribute("aria-pressed", String(button.dataset.mode === ui.mode));
     const steps = $("intensity");
     steps.replaceChildren();
-    const level = INTENSITY.find(([, , db, response]) => p.sensitivity === db && p.response === response);
-    for (const [id, label, db, response] of INTENSITY) {
+    const level = INTENSITY.find(([, , db]) => p.sensitivity === db);
+    for (const [id, label, db] of INTENSITY) {
       const b = el("button", { type: "button", textContent: label, id: `intensity-${id}` });
       b.setAttribute("role", "radio");
       radio(b, level !== undefined && level[0] === id);
-      b.addEventListener("click", () => setPending({ sensitivity: db, response }, { keepFocus: b.id }));
+      b.addEventListener("click", () => setPending({ sensitivity: db }, { keepFocus: b.id }));
       steps.append(b);
     }
     $("intensity-hint").textContent = level
-      ? level[4]
-      : `Custom: ${formatValue("sensitivity", p.sensitivity)}, ${p.response} response, set under Fine-tuning.`;
+      ? level[3]
+      : `Custom: ${formatValue("sensitivity", p.sensitivity)}, set under Fine-tuning.`;
     const responses = $("responses");
     responses.replaceChildren();
     for (const r of ui.responses) {
