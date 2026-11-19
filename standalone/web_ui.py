@@ -19,6 +19,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import socket
 import time
 from dataclasses import dataclass
@@ -107,6 +108,10 @@ EFFECT_LABELS = {
     Effect.SIDE_BARS: (
         "Side bars",
         "Bars growing from the middle of each side: bass left, treble right",
+    ),
+    Effect.LIQUID: (
+        "Liquid",
+        "Swirling trails that zoom, twist and fade into themselves, like the MilkDrop visualizer",
     ),
     Effect.MANUAL: ("Manual", "Every LED in the custom colour; does not follow the music"),
 }
@@ -292,7 +297,7 @@ def _parse_my_palettes(value: Any) -> tuple[MyPalette, ...]:
 class WebUi:
     """The web server behind the page."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         bridge: Bridge,
         demo: DemoFeatures,
@@ -300,6 +305,7 @@ class WebUi:
         saver: Saver | None = None,
         allowed_remote: str | None = None,
         my_palettes: tuple[MyPalette, ...] = (),
+        version: str | None = None,
     ) -> None:
         """
         Initialize the web UI.
@@ -310,7 +316,9 @@ class WebUi:
             the bridge restarts.
         :param allowed_remote: The only client address allowed to connect, if any.
         :param my_palettes: The palettes the user made, as saved last time.
+        :param version: The version shown next to the status, if known.
         """
+        self._version = version
         self._my_palettes = my_palettes
         self._bridge = bridge
         self._demo = demo
@@ -399,8 +407,9 @@ class WebUi:
                     "palette_colors": PALETTE_COLORS_RANGE,
                     "my_palettes": (0, MAX_MY_PALETTES),
                 },
-                "playing": self._bridge.streaming,
+                **self._status(),
                 "saves": self._saver is not None,
+                "version": self._version,
             }
         )
 
@@ -478,6 +487,7 @@ class WebUi:
         start = last = time.perf_counter()
         last_beat = -1
         status: dict[str, Any] | None = None
+        told: set[web.WebSocketResponse] = set()
         while self._clients:
             await asyncio.sleep(period)
             now = time.perf_counter()
@@ -505,17 +515,27 @@ class WebUi:
                 preview_rgb = idle.render(dt)
             # Read both at once, so the two pictures show the same moment.
             frame = self._bridge.last_rgb + preview_rgb
-            current = {"type": "status", "playing": self._bridge.streaming}
+            current = {"type": "status", **self._status()}
             current["palettes"] = self._palettes()
             current["album_modes"] = self._album_modes()
+            if current != status:
+                told.clear()
+                status = current
             for ws in list(self._clients):
                 with contextlib.suppress(ConnectionResetError, RuntimeError):
-                    if current != status:
+                    # Every page hears the status once, also one that opened later.
+                    if ws not in told:
                         await ws.send_json(current)
+                        told.add(ws)
                     await ws.send_bytes(frame)
-            status = current
+            told &= self._clients
 
     # --------------------------------------------------------------- helpers
+
+    def _status(self) -> dict[str, Any]:
+        """Return whether music plays, where it comes from and the player's name."""
+        bridge = self._bridge
+        return {"playing": bridge.streaming, "source": bridge.source, "player": bridge.name}
 
     def _set_preview(self, settings: EngineSettings) -> None:
         self._preview_settings = settings
@@ -593,6 +613,16 @@ def _is_local_host(host: str) -> bool:
     return name in {"localhost", own, f"{own}.local"} or name.endswith(".localhost")
 
 
+def repo_version() -> str | None:
+    """Return the add-on version in this checkout's ``config.yaml``, if it is there."""
+    config = Path(__file__).resolve().parent.parent / "hyperhdr_sync_addon" / "config.yaml"
+    try:
+        match = re.search(r'^version:\s*"?([^"\s]+)"?', config.read_text(), re.MULTILINE)
+    except OSError:
+        return None
+    return match.group(1) if match else None
+
+
 # ------------------------------------------------------------------ Supervisor
 
 
@@ -658,8 +688,11 @@ async def start_web_ui(  # noqa: PLR0913
     saver: Saver | None = None
     allowed_remote: str | None = None
     my_palettes: tuple[MyPalette, ...] = ()
+    version = repo_version()
     if supervisor:
         info = await supervisor_info(session)
+        # The version Home Assistant shows for the add-on.
+        version = str(info.get("version") or version or "") or None
         # A host-network add-on is reached on the gateway of Home Assistant's internal
         # network, so the panel is not exposed on the LAN; the Supervisor itself sits
         # at the next address and is the only client that may connect.
@@ -673,7 +706,12 @@ async def start_web_ui(  # noqa: PLR0913
             LOGGER.warning("Ignoring the saved palettes: %s", err)
     runner = web.AppRunner(
         WebUi(
-            bridge, demo, saver=saver, allowed_remote=allowed_remote, my_palettes=my_palettes
+            bridge,
+            demo,
+            saver=saver,
+            allowed_remote=allowed_remote,
+            my_palettes=my_palettes,
+            version=version,
         ).make_app(),
         access_log=None,
     )

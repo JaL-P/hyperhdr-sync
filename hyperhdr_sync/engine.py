@@ -68,6 +68,9 @@ _SCROLL_LENGTH: int = 96
 _MAX_RIPPLES: int = 10
 # Most flakes, sparks and fireflies drawn at once.
 _MAX_PARTICLES: int = 48
+# Liquid: the size of the picture it swirls (across, down) and the points on its ring.
+_LIQUID_W, _LIQUID_H = 48, 27
+_LIQUID_RING = 160
 
 
 class Effect(StrEnum):
@@ -116,6 +119,11 @@ class Effect(StrEnum):
     """A sun at the top pulsing with the bass, grid lines rushing down the sides."""
     SIDE_BARS = "side_bars"
     """Bars growing from the middle of each side: bass on the left, treble on the right."""
+    LIQUID = "liquid"
+    """
+    Swirling trails that zoom, twist and fade into themselves, in the style of the
+    MilkDrop visualizer (our own code; no MilkDrop code or presets are used).
+    """
 
 
 class AlbumMode(StrEnum):
@@ -282,6 +290,15 @@ class Engine:
         self._from_mid = np.clip(np.abs(along - 0.5) * 2.0, 0.0, 1.0).astype(np.float32)
         self._height = (1.0 - y).astype(np.float32)
         self._side = self._edge < 2
+        # Liquid: the position of every pixel of its picture and of every LED on it (-1..1;
+        # the LEDs slightly inside the picture's border, where its trails are brightest).
+        grid_v, grid_u = np.meshgrid(
+            np.linspace(-1.0, 1.0, _LIQUID_H, dtype=np.float32),
+            np.linspace(-1.0, 1.0, _LIQUID_W, dtype=np.float32),
+            indexing="ij",
+        )
+        self._liquid_grid = (grid_u, grid_v)
+        self._liquid_at = ((x * 2.0 - 1.0) * 0.92, (y * 2.0 - 1.0) * 0.92)
         # Crystals: fixed shards around the screen, each tied to one frequency band.
         shards = max(4, count // 14)
         shard_rng = np.random.default_rng(11)
@@ -400,6 +417,9 @@ class Engine:
         self._aurora_height = 0.3
         self._aurora_glow = 0.0
         self._horizon_phase = 0.0
+        self._liquid = np.zeros((_LIQUID_H, _LIQUID_W, 3), np.float32)
+        self._liquid_spin = 0.0
+        self._liquid_hue = 0.0
 
     def feed(
         self,
@@ -473,6 +493,7 @@ class Engine:
             Effect.AURORA: lambda: self._fx_aurora(dt),
             Effect.HORIZON: lambda: self._fx_horizon(dt),
             Effect.SIDE_BARS: self._fx_side_bars,
+            Effect.LIQUID: lambda: self._fx_liquid(dt),
         }
         frame = effects[self.settings.effect]()
         # Manual is a fixed light: it stays on through quiet passages.
@@ -1011,6 +1032,46 @@ class Engine:
         )
         return frame
 
+    def _fx_liquid(self, dt: float) -> np.ndarray:
+        """
+        Swirl a small picture into itself, MilkDrop style, and show its edges on the LEDs.
+
+        Every frame the picture is zoomed out from the middle, twisted, rippled and faded a
+        little; then a ring shaped by the spectrum is drawn into it. So what the music drew
+        a moment ago spreads out to the screen's edges as glowing trails. Beats kick the
+        zoom and turn the twist round.
+
+        :param dt: Seconds since the previous frame.
+        """
+        frames = dt * 60.0  # the motion is tuned per frame at 60 frames a second
+        if self._new_beat > 0.0:
+            turn = -1.0 if self._liquid_spin > 0.0 else 1.0
+            self._liquid_spin = turn * (0.4 + 0.6 * self._new_beat)
+        self._liquid_spin *= 0.985**frames
+        # The colours travel round the ring, faster when louder.
+        self._liquid_hue = (self._liquid_hue + dt * (0.03 + 0.12 * self._level_slow)) % 1.0
+        zoom = 1.0 + (0.012 + 0.03 * self._level + 0.06 * self._pulse) * frames
+        angle = (0.004 + 0.02 * self._liquid_spin + 0.006 * math.sin(self._time * 0.31)) * frames
+        # Where each pixel takes its colour from: nearer the middle, turned and rippled.
+        u, v = self._liquid_grid
+        cos, sin = math.cos(angle), math.sin(angle)
+        ripple = 0.012 * (0.4 + self._mid) * frames
+        src_u = (u * cos - v * sin) / zoom + ripple * np.sin(v * 7.0 + self._time * 1.3)
+        src_v = (u * sin + v * cos) / zoom + ripple * np.cos(u * 6.0 - self._time * 1.1)
+        picture = _bilinear(self._liquid, src_u, src_v) * (0.955**frames)
+        # The ring: its radius at each angle follows one band of the spectrum, mirrored so
+        # the bass sits at the sides and the treble at the top and bottom.
+        theta = np.linspace(0.0, 2.0 * math.pi, _LIQUID_RING, endpoint=False, dtype=np.float32)
+        fold = np.abs(np.cos(theta)) * (SPECTRUM_BINS - 1)
+        bands = np.interp(fold, np.arange(SPECTRUM_BINS), self._bands).astype(np.float32)
+        radius = 0.12 + 0.3 * bands + 0.08 * self._pulse
+        shade = (0.35 + 0.65 * bands) * self._level
+        colors = _sample_wrap(self._lut_cyclic, theta / (2.0 * math.pi) + self._liquid_hue)
+        _splat(picture, radius * np.cos(theta), radius * np.sin(theta), colors * shade[:, None])
+        self._liquid = np.minimum(picture, 1.5).astype(np.float32)
+        frame: np.ndarray = _bilinear(self._liquid, *self._liquid_at)
+        return frame
+
     def _solid(self, level: float) -> np.ndarray:
         """Every LED in the custom colour at ``level``."""
         color = np.array(self.settings.color, np.float32) / 255.0 * level
@@ -1196,6 +1257,38 @@ def _sample_wrap(lut: np.ndarray, at: np.ndarray) -> np.ndarray:
     size = len(lut)
     colors: np.ndarray = lut[np.minimum((np.mod(at, 1.0) * size).astype(np.intp), size - 1)]
     return colors
+
+
+def _bilinear(picture: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray:
+    """
+    Read a picture between its pixels, blending the four nearest; black outside it.
+
+    :param picture: Rows of ``R G B`` pixels, spanning -1..1 both ways.
+    :param u: Across, -1 (left) to 1 (right).
+    :param v: Down, -1 (top) to 1 (bottom).
+    """
+    height, width = picture.shape[:2]
+    x = (u + 1.0) * 0.5 * (width - 1)
+    y = (v + 1.0) * 0.5 * (height - 1)
+    inside = (x >= 0) & (x <= width - 1) & (y >= 0) & (y <= height - 1)
+    x = np.clip(x, 0, width - 1)
+    y = np.clip(y, 0, height - 1)
+    x0 = np.minimum(x.astype(np.intp), width - 2)
+    y0 = np.minimum(y.astype(np.intp), height - 2)
+    fx = (x - x0)[..., None]
+    fy = (y - y0)[..., None]
+    top = picture[y0, x0] * (1 - fx) + picture[y0, x0 + 1] * fx
+    bottom = picture[y0 + 1, x0] * (1 - fx) + picture[y0 + 1, x0 + 1] * fx
+    result: np.ndarray = (top * (1 - fy) + bottom * fy) * inside[..., None]
+    return result
+
+
+def _splat(picture: np.ndarray, u: np.ndarray, v: np.ndarray, colors: np.ndarray) -> None:
+    """Add each colour to the picture's pixel nearest its point (axes as in ``_bilinear``)."""
+    height, width = picture.shape[:2]
+    x = np.clip(np.rint((u + 1.0) * 0.5 * (width - 1)).astype(np.intp), 0, width - 1)
+    y = np.clip(np.rint((v + 1.0) * 0.5 * (height - 1)).astype(np.intp), 0, height - 1)
+    np.add.at(picture, (y, x), colors)
 
 
 def _sample_one(lut: np.ndarray, at: float) -> np.ndarray:

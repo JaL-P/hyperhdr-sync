@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.1
+
+- A new effect, Liquid: a picture that keeps zooming, twisting and fading into itself while the
+  music draws a ring on it, so trails spread out to the screen's edges. Our own effect in the
+  style of the MilkDrop visualizer; no MilkDrop code or presets are used.
+- A Random button next to Effect previews a different effect each time; Apply keeps it.
+- A Credits link at the bottom of the web UI opens a list of the projects HyperHDR Sync builds on.
+- The web UI always shows all effects, grouped by mood; "Show all" is gone.
+- The web UI shows the add-on version next to the status, so you can see which version runs.
+- When no music reaches the LEDs for a few seconds, the web UI shows a yellow "!" with what to
+  do: in Music Assistant, open the player you listen on, choose Group members and tick the
+  bridge's screen (named after the add-on's `name` option, "HyperHDR LEDs" by default). If
+  the bridge cannot reach Music Assistant, it says that instead.
+
 ## 0.5.0
 
 - Ten new effects, our own takes on ideas from [Paraline](https://github.com/SamXop123/Paraline)

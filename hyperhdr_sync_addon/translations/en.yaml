@@ -10,7 +10,7 @@ configuration:
     description: "Name of the player that appears in Music Assistant."
   effect:
     name: "Effect"
-    description: "spectrum, vu (level meter), pulse, ripple, scroll, energy, ambient, lumina (adaptive brightness), colora (adaptive colour), retro, scanner, rhythm, party, flow, centre_pulse, fireflies, snowfall, crystals, braids, embers, aurora, horizon, side_bars, or manual (the custom colour, not following the music). The web UI previews them."
+    description: "spectrum, vu (level meter), pulse, ripple, scroll, energy, ambient, lumina (adaptive brightness), colora (adaptive colour), retro, scanner, rhythm, party, flow, centre_pulse, fireflies, snowfall, crystals, braids, embers, aurora, horizon, side_bars, liquid, or manual (the custom colour, not following the music). The web UI previews them."
   palette:
     name: "Colours"
     description: "album uses the colours of the cover art, classic is green-yellow-red, custom uses shades of the custom colour, mine uses your own palette (make it in the web UI)."

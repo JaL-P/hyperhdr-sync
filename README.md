@@ -135,6 +135,7 @@ off while Music Assistant starts, and re-reads the layout when music starts.
 | Aurora | Slow, folded curtains of colour rising from the bottom. Inspired by Paraline |
 | Horizon | A sun at the top pulsing with the bass, grid lines rushing down the sides. Inspired by Paraline |
 | Side bars | Bars growing from the middle of each side: bass left, treble right. Inspired by Paraline |
+| Liquid | Swirling trails that zoom, twist and fade into themselves. In the style of MilkDrop |
 
 Brightness adapts to each track by itself: every frequency band is scaled against its own recent
 maximum, so quiet and loud recordings both use the full range.
@@ -174,6 +175,13 @@ are our own takes on effect ideas from [Paraline](https://github.com/SamXop123/P
 [SamXop123](https://github.com/SamXop123), a desktop audio visualizer that turns the edges of
 the screen into light. They are written for LED strips from Paraline's descriptions of its
 themes; no code is taken from Paraline, whose licence does not allow reuse.
+
+Liquid is our own effect in the style of [MilkDrop](https://www.geisswerks.com/milkdrop/) by
+Ryan Geiss, the music visualizer Music Assistant also offers as a plugin: a picture that keeps
+zooming, twisting and fading into itself while the music draws on it. No MilkDrop code or
+presets are used.
+
+The web UI's **Credits** link lists everyone this project builds on.
 
 ## Support
 
