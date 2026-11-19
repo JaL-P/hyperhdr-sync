@@ -19,6 +19,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import socket
 import time
 from dataclasses import dataclass
@@ -292,7 +293,7 @@ def _parse_my_palettes(value: Any) -> tuple[MyPalette, ...]:
 class WebUi:
     """The web server behind the page."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         bridge: Bridge,
         demo: DemoFeatures,
@@ -300,6 +301,7 @@ class WebUi:
         saver: Saver | None = None,
         allowed_remote: str | None = None,
         my_palettes: tuple[MyPalette, ...] = (),
+        version: str | None = None,
     ) -> None:
         """
         Initialize the web UI.
@@ -310,7 +312,9 @@ class WebUi:
             the bridge restarts.
         :param allowed_remote: The only client address allowed to connect, if any.
         :param my_palettes: The palettes the user made, as saved last time.
+        :param version: The version shown next to the status, if known.
         """
+        self._version = version
         self._my_palettes = my_palettes
         self._bridge = bridge
         self._demo = demo
@@ -401,6 +405,7 @@ class WebUi:
                 },
                 **self._status(),
                 "saves": self._saver is not None,
+                "version": self._version,
             }
         )
 
@@ -604,6 +609,16 @@ def _is_local_host(host: str) -> bool:
     return name in {"localhost", own, f"{own}.local"} or name.endswith(".localhost")
 
 
+def repo_version() -> str | None:
+    """Return the add-on version in this checkout's ``config.yaml``, if it is there."""
+    config = Path(__file__).resolve().parent.parent / "hyperhdr_sync_addon" / "config.yaml"
+    try:
+        match = re.search(r'^version:\s*"?([^"\s]+)"?', config.read_text(), re.MULTILINE)
+    except OSError:
+        return None
+    return match.group(1) if match else None
+
+
 # ------------------------------------------------------------------ Supervisor
 
 
@@ -669,8 +684,11 @@ async def start_web_ui(  # noqa: PLR0913
     saver: Saver | None = None
     allowed_remote: str | None = None
     my_palettes: tuple[MyPalette, ...] = ()
+    version = repo_version()
     if supervisor:
         info = await supervisor_info(session)
+        # The version Home Assistant shows for the add-on.
+        version = str(info.get("version") or version or "") or None
         # A host-network add-on is reached on the gateway of Home Assistant's internal
         # network, so the panel is not exposed on the LAN; the Supervisor itself sits
         # at the next address and is the only client that may connect.
@@ -684,7 +702,12 @@ async def start_web_ui(  # noqa: PLR0913
             LOGGER.warning("Ignoring the saved palettes: %s", err)
     runner = web.AppRunner(
         WebUi(
-            bridge, demo, saver=saver, allowed_remote=allowed_remote, my_palettes=my_palettes
+            bridge,
+            demo,
+            saver=saver,
+            allowed_remote=allowed_remote,
+            my_palettes=my_palettes,
+            version=version,
         ).make_app(),
         access_log=None,
     )

@@ -87,7 +87,11 @@
   .pill.waiting .bang { display: grid; }
   .pill.waiting .dot { display: none; }
   .readout { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 12px; letter-spacing: 0.02em; }
-  header .readout { margin-left: auto; color: var(--muted); }
+  header .readout { color: var(--muted); }
+  header #count { margin-left: auto; }
+  header .version { padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); }
+  /* On a phone the LED count is under the preview, so the status, version and theme fit one row. */
+  @media (max-width: 560px) { header #count { display: none; } header #themes { margin-left: auto; } }
   .seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: 9px; background: var(--chip); }
   .seg button { border: 0; background: transparent; color: var(--muted); border-radius: 7px; padding: 5px 12px; font-size: 13px; cursor: pointer; }
   .seg button[aria-pressed="true"], .seg button[aria-checked="true"] { background: var(--card); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }
@@ -284,6 +288,7 @@
   <header>
     <h1>HyperHDR Sync</h1>
     <span class="pill" id="status"><span class="dot"></span><span class="bang" aria-hidden="true">!</span><span id="status-text">Connecting…</span></span>
+    <span class="readout version" id="version" hidden></span>
     <span class="readout" id="count"></span>
     <div class="seg icons" id="themes" role="radiogroup" aria-label="Theme">
       <button type="button" role="radio" data-theme="system" aria-label="Follow the system" title="Follow the system"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></button>
@@ -1038,6 +1043,11 @@
     ui.applied = state.settings;
     ui.pending = structuredClone(state.settings);
     setStatus(state, { startup: true });
+    if (state.version) {
+      $("version").textContent = `v${state.version}`;
+      $("version").title = `HyperHDR Sync ${state.version}`;
+      $("version").hidden = false;
+    }
     ui.effects = state.effects;
     ui.palettes = state.palettes;
     ui.albumModes = state.album_modes;

@@ -148,6 +148,7 @@ async def test_page_state_and_apply() -> None:
         assert state["playing"] is False
         assert state["source"] == "connecting"
         assert state["player"] == "HyperHDR LEDs"
+        assert state["version"] is None
         assert {p["id"] for p in state["palettes"]} == {p.value for p in Palette} - {"mine"}
         assert {m["id"] for m in state["album_modes"]} == {m.value for m in AlbumMode}
         assert all(len(p["colors"]) >= 2 for p in state["palettes"])
@@ -196,6 +197,21 @@ async def test_preview_streams_without_touching_the_leds() -> None:
         async with asyncio.timeout(5):
             while bridge.preview is not None:  # noqa: ASYNC110
                 await asyncio.sleep(0.02)
+    finally:
+        await client.close()
+
+
+def test_version_comes_from_the_addon_config() -> None:
+    """Without the Supervisor, the page shows the add-on version of this checkout."""
+    config = (Path(__file__).parent.parent / "hyperhdr_sync_addon" / "config.yaml").read_text()
+    assert f'version: "{web_ui.repo_version()}"' in config
+
+
+async def test_page_shows_the_version() -> None:
+    """The version handed to the web UI reaches the page."""
+    client = await _client(web_ui.WebUi(_bridge(), bridge_module.demo_features, version="9.8.7"))
+    try:
+        assert (await (await client.get("/api/state")).json())["version"] == "9.8.7"
     finally:
         await client.close()
 

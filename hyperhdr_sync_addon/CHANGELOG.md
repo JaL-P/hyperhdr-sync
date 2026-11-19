@@ -6,6 +6,7 @@
   by SamXop123 (written from its descriptions; no code taken): Flow, Centre pulse, Fireflies,
   Snowfall, Crystals, Braids, Embers, Aurora, Horizon and Side bars.
 - The web UI always shows all effects, grouped by mood; "Show all" is gone.
+- The web UI shows the add-on version next to the status, so you can see which version runs.
 - When no music reaches the LEDs for a few seconds, the web UI shows a yellow "!" with what to
   do: in Music Assistant, open the player you listen on, choose Group members and tick the
   bridge's screen (named after the add-on's `name` option, "HyperHDR LEDs" by default). If
