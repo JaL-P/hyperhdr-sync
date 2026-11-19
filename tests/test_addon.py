@@ -54,7 +54,11 @@ def test_config_is_complete() -> None:
     # the default used for building by hand follows the add-on version
     dockerfile = (ADDON / "Dockerfile").read_text(encoding="utf-8")
     assert f"ARG BUILD_VERSION={config['version']}\n" in dockerfile
-    assert "refs/tags/v${BUILD_VERSION}.tar.gz" in dockerfile
+    # The code comes from main, and the version in the download step makes each new version
+    # download it again instead of reusing Docker's cached layer.
+    assert "ARG BUILD_REF=main\n" in dockerfile
+    assert "refs/heads/${BUILD_REF}.tar.gz" in dockerfile
+    assert '"Building add-on ${BUILD_VERSION} from ${BUILD_REF}"' in dockerfile
 
 
 def test_choices_match_engine() -> None:
