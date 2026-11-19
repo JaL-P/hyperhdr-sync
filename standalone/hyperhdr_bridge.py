@@ -38,7 +38,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from milkdrop import WaveformFeed, waveform_loop, web_url_from_sendspin
+from milkdrop import WaveformFeed, preferences_loop, waveform_loop, web_url_from_sendspin
 from milkdrop_render import LIVE, PREVIEW, MilkdropRenderer
 
 from hyperhdr_sync.engine import (
@@ -214,6 +214,9 @@ class Bridge:
             self._frames.clear()
             self.engine.reset()
             self._refork_preview()
+            if self.milkdrop is not None:
+                # Music Assistant picks a preset when its visualizer opens.
+                self.milkdrop.repick()
         self.streaming = True
 
     def on_stream_end(self, roles: list[str] | None) -> None:
@@ -259,6 +262,14 @@ class Bridge:
         self.engine.set_album_colors(colors)
         if self.preview is not None:
             self.preview.set_album_colors(colors)
+        # The colour Music Assistant tints its MilkDrop visualizer with in its dark
+        # full-screen player, for the MilkDrop palette.
+        tint = getattr(color, "on_light", None)
+        if tint is None or (isinstance(tint, (tuple, list)) and len(tint) >= 3):
+            rgb = None if tint is None else (int(tint[0]), int(tint[1]), int(tint[2]))
+            self.engine.set_milkdrop_tint(rgb)
+            if self.preview is not None:
+                self.preview.set_milkdrop_tint(rgb)
 
     def stop_stream(self) -> None:
         """Stop rendering; the render loop then blacks the LEDs out."""
@@ -329,6 +340,8 @@ class Bridge:
             beat = self._beats.pop(0)
             if playhead_us - beat.timestamp_us <= STALE_BEAT_US:
                 self._stats["beats"] += 1
+                if beat.is_downbeat and self.milkdrop is not None:
+                    self.milkdrop.downbeat()
                 for engine in engines:
                     engine.beat(1.0 if beat.is_downbeat else 0.8)
 
@@ -614,6 +627,9 @@ async def run(args: argparse.Namespace) -> None:
                             bridge.waveform, session, web_url, ma_token, args.milkdrop_player
                         )
                     )
+                    loops.append(
+                        preferences_loop(bridge.milkdrop.set_ma_prefs, session, web_url, ma_token)
+                    )
                 await asyncio.gather(*loops)
         finally:
             # Spaced out, so they are not dropped together; the socket closes right after.
@@ -679,7 +695,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--milkdrop-preset",
         default="",
-        help="MilkDrop preset of the MilkDrop effect (default: a random one every 30 seconds)",
+        help="MilkDrop preset of the MilkDrop effect (default: picked as Music Assistant does)",
     )
     parser.add_argument(
         "--chromium",

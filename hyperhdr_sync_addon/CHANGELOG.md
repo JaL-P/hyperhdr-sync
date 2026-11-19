@@ -5,10 +5,12 @@
 - **MilkDrop**, a new effect under Visualizer: the real MilkDrop presets, as in Music
   Assistant's visualizer, seen by the LEDs like a screen grabber would. The add-on draws them
   with Butterchurn in a built-in headless Chromium, which only runs while MilkDrop is in use.
-  Pick one of the 472 presets in the web UI, or keep Random for a new one every 30 seconds.
-- **Colours > MilkDrop**: with the MilkDrop effect, each preset's own colours (Album cover, a
-  Palette or Your colour tint the picture instead, as Music Assistant does); with any other
-  effect, the colours round the edges of the live MilkDrop picture.
+  It mirrors Music Assistant: the same 245 presets and quality, and by default presets are
+  picked as your Music Assistant visualizer is set up (random, favourites, fixed, beat switch),
+  read with the Music Assistant token; you can also pick one for the LEDs only.
+- **Colours > MilkDrop**: the picture tinted with the cover's colour, as Music Assistant shows
+  it (Album cover, a Palette or Your colour tint it with those colours instead); with any
+  other effect, the colours round the edges of the live MilkDrop picture.
 - The add-on image now includes Chromium, so it is larger.
 - Liquid can draw the real sound wave, as MilkDrop does, from Music Assistant's MilkDrop
   Visualizer plugin: enable the plugin in Music Assistant and put a Music Assistant long-lived

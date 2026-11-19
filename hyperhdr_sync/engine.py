@@ -183,9 +183,10 @@ class Palette(StrEnum):
     """The user's own colours (:attr:`EngineSettings.colors`), blended or as blocks."""
     MILKDROP = "milkdrop"
     """
-    The colours of the MilkDrop picture: with the MilkDrop effect, each preset's own colours
-    (any other palette tints the picture instead); with another effect, the colours at the
-    edges of the live picture, so they change with it. The rainbow until a picture arrives.
+    The colours of the MilkDrop picture as Music Assistant shows it: tinted with the cover's
+    colour (:meth:`Engine.set_milkdrop_tint`), or the preset's own colours without one. With
+    the MilkDrop effect any other palette tints the picture instead; with another effect, the
+    palette is the colours round the edges of the live picture. The rainbow until one arrives.
     """
 
 
@@ -340,6 +341,7 @@ class Engine:
         self._picture: np.ndarray | None = None
         self._picture_at = -math.inf
         self._picture_palette_due = 0.0
+        self._milkdrop_tint: np.ndarray | None = None
         # The waveform made from the spectrum: a sine at the middle of each band.
         self._synth_freqs = np.geomspace(SPECTRUM_F_MIN, SPECTRUM_F_MAX, SPECTRUM_BINS)
         self._synth_phase = np.random.default_rng(5).random(SPECTRUM_BINS) * 2.0 * math.pi
@@ -382,6 +384,28 @@ class Engine:
         self.settings = settings
         if palette_changed:
             self._rebuild_palette()
+
+    def set_milkdrop_tint(self, color: Sequence[int] | None) -> None:
+        """
+        Set the colour Music Assistant tints its MilkDrop visualizer with, or None for none.
+
+        Music Assistant blends one colour of the cover over the picture (a colour blend: the
+        picture keeps its brightness, the colour gives hue and saturation): ``on_light`` of
+        the track's palette in its dark full-screen player.
+
+        :param color: The colour (RGB 0-255), or None.
+        """
+        self._milkdrop_tint = (
+            None if color is None else np.array(color[:3], np.float32).reshape(1, 3) / 255.0
+        )
+
+    @property
+    def milkdrop_tint(self) -> tuple[int, int, int] | None:
+        """The colour given to :meth:`set_milkdrop_tint`, if any."""
+        if self._milkdrop_tint is None:
+            return None
+        r, g, b = (round(float(c) * 255.0) for c in self._milkdrop_tint[0])
+        return (r, g, b)
 
     def set_album_colors(self, colors: Iterable[Sequence[int]] | None) -> None:
         """
@@ -1177,18 +1201,25 @@ class Engine:
         return bytes(np.rint(np.clip(wave, -1.0, 1.0) * 127.0 + 128.0).astype(np.uint8))
 
     def _read_picture(self) -> np.ndarray:
-        """Each LED's colour from the picture, averaged over a little depth from its edge."""
+        """
+        Each LED's colour from the picture, averaged over a little depth from its edge.
+
+        With the MilkDrop palette the picture is tinted as Music Assistant shows it.
+        """
         assert self._picture is not None
         reads = [_bilinear(self._picture, u, v) for u, v in self._picture_reads]
         colors: np.ndarray = np.mean(reads, axis=0)
+        if self.settings.palette == Palette.MILKDROP and self._milkdrop_tint is not None:
+            colors = _blend_color(colors, np.broadcast_to(self._milkdrop_tint, colors.shape))
         return colors
 
     def _fx_milkdrop(self, dt: float) -> np.ndarray:
         """
-        Show the MilkDrop picture at the LEDs; any palette but MilkDrop tints it.
+        Show the MilkDrop picture at the LEDs, tinted as the palette says.
 
-        The tint works as in Music Assistant's visualizer (a colour blend): each LED keeps
-        the picture's brightness and takes its hue and saturation from the palette.
+        The MilkDrop palette tints it as Music Assistant does, with the cover's colour; any
+        other palette tints it with its own colours round the screen. Either way it is a
+        colour blend: each LED keeps the picture's brightness, the tint gives the colour.
 
         :param dt: Seconds since the previous frame.
         """

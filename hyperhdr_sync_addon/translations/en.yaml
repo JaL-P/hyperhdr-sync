@@ -61,7 +61,7 @@ configuration:
     description: "Optional. Defaults to the Sendspin address's host on port 8095, for example http://127.0.0.1:8095."
   milkdrop_preset:
     name: "MilkDrop preset"
-    description: "The preset of the MilkDrop effect, by name; empty shows a random one every 30 seconds. Easiest to pick in the web UI."
+    description: "The preset of the MilkDrop effect, by name; empty picks them as your Music Assistant visualizer does. Easiest to pick in the web UI."
   milkdrop_player:
     name: "MilkDrop player"
     description: "Optional. The Music Assistant player id whose sound wave to draw; empty follows the player that is playing."

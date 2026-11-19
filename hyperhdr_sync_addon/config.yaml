@@ -68,6 +68,6 @@ schema:
   ma_token: "password?"
   ma_url: "url?"
   milkdrop_player: "str?"
-  # the MilkDrop effect's preset; empty for a random one every 30 seconds
+  # the MilkDrop effect's preset; empty picks them as Music Assistant does
   milkdrop_preset: "str?"
   log_level: "list(debug|info|warning|error)"

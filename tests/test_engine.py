@@ -506,3 +506,25 @@ def test_synth_waveform_follows_the_music() -> None:
     wave = np.frombuffer(engine.synth_waveform(), np.uint8).astype(int) - 128
     assert len(wave) == 1024
     assert np.abs(wave).max() > 60
+
+
+def test_milkdrop_palette_tints_like_music_assistant() -> None:
+    """The MilkDrop palette blends the cover's colour over the picture; its brightness stays."""
+    picture = _picture((255, 0, 0), (0, 0, 255))
+    frames = []
+    for tint in (None, (40, 200, 90)):
+        engine = Engine(
+            _tv_layout(), EngineSettings(effect=Effect.MILKDROP, palette=Palette.MILKDROP)
+        )
+        engine.set_milkdrop_tint(tint)
+        assert engine.milkdrop_tint == tint
+        frame = np.zeros((1, 3))
+        for _ in range(30):
+            engine.feed(loudness=LOUD, spectrum=[LOUD] * SPECTRUM_BINS, picture=picture)
+            frame = np.frombuffer(engine.render(DT), np.uint8).reshape(-1, 3) / 255.0
+        frames.append(frame)
+    own, tinted = frames
+    weights = np.array([0.3, 0.59, 0.11])
+    assert np.allclose(own @ weights, tinted @ weights, atol=0.03), "same brightness"
+    assert (own[:14, 0] > own[:14, 1]).all(), "untinted: the preset's own red"
+    assert (tinted[:14, 1] > tinted[:14, 0]).all(), "tinted: green from the cover"

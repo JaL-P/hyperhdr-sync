@@ -704,7 +704,7 @@
     $("effect-hint").textContent = p.effect === "manual" ? "Ignores the music" : mood ? MOOD_HINTS[mood[0]] : "";
   }
 
-  // The MilkDrop preset: random every 30 seconds, or one kept. The list arrives once the
+  // The MilkDrop preset: picked as Music Assistant does, or one kept. The list arrives once the
   // bridge's renderer has started, which happens when MilkDrop is first shown.
   let presetList = null;
   function renderMilkdrop() {
@@ -717,16 +717,20 @@
     const key = names.length + ":" + p.milkdrop_preset;
     if (presetList !== key && document.activeElement !== select) {
       presetList = key;
-      const options = [el("option", { value: "", textContent: "Random, a new one every 30 seconds" })];
+      const options = [el("option", { value: "", textContent: "Same as Music Assistant" })];
       if (p.milkdrop_preset && !names.includes(p.milkdrop_preset)) options.push(el("option", { value: p.milkdrop_preset, textContent: p.milkdrop_preset }));
       for (const name of names) options.push(el("option", { value: name, textContent: name }));
       select.replaceChildren(...options);
       select.value = p.milkdrop_preset;
     }
     $("milkdrop-shuffle").disabled = !names.length;
+    // Following Music Assistant: say how it picks presets, from its settings or its defaults.
+    const follows = p.milkdrop_preset ? ""
+      : md.from_music_assistant ? ` Music Assistant: ${md.follows}.`
+      : ` Music Assistant's default: ${md.follows}. Add a Music Assistant token to follow your own settings and favourites.`;
     $("milkdrop-now").textContent = md.unavailable ? `${md.unavailable}. Liquid stands in.`
       : !names.length ? "Starting the MilkDrop renderer…"
-      : md.showing ? `Showing: ${md.showing}` : "";
+      : (md.showing ? `Showing: ${md.showing}.` : "") + follows;
   }
 
   function colourDots(container, idPrefix) {
@@ -754,7 +758,7 @@
     const manual = p.effect === "manual";
     $("sources").hidden = manual;
     $("colours-hint").textContent = manual ? "Solid colour uses one colour"
-      : p.palette === "milkdrop" ? (p.effect === "milkdrop" ? "Each preset's own colours" : "The colours of the live MilkDrop picture")
+      : p.palette === "milkdrop" ? (p.effect === "milkdrop" ? "As Music Assistant shows it: tinted with the cover's colour" : "The colours of the live MilkDrop picture")
       : p.effect === "milkdrop" ? "Tints the MilkDrop picture, like Music Assistant" : "";
     const builtIn = ui.palettes.filter((x) => !["album", "custom", "milkdrop"].includes(x.id));
     const milkdrop = ui.palettes.find((x) => x.id === "milkdrop");

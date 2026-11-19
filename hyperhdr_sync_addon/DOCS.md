@@ -20,9 +20,11 @@ your LEDs keep their current look. **Apply** puts the new settings on the LEDs a
 the add-on's configuration.
 
 **MilkDrop** (under Visualizer) shows the real MilkDrop presets, as in Music Assistant's
-visualizer, seen by the LEDs like a screen grabber would. Pick a preset under the effects, or
-keep Random for a new one every 30 seconds. **Colours > MilkDrop** keeps the presets' own
-colours; Album cover, a Palette or Your colour tint the picture, as Music Assistant does. The
+visualizer, seen by the LEDs like a screen grabber would. The preset picker's default, **Same as
+Music Assistant**, picks presets the way your Music Assistant visualizer is set up (random,
+favourites, fixed, beat switch); with no Music Assistant token it uses Music Assistant's
+defaults. **Colours > MilkDrop** tints the picture with the cover's colour, as Music
+Assistant does; Album cover, a Palette or Your colour tint it with those colours instead. The
 add-on draws the presets in a built-in Chromium, which only runs while MilkDrop is in use.
 
 **Random** next to Effect previews a different effect each time you press it. **Credits** at the

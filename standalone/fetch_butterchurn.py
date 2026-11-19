@@ -2,7 +2,9 @@
 Fetch Butterchurn and its presets for the MilkDrop effect.
 
 Butterchurn (https://github.com/jberg/butterchurn, MIT) is MilkDrop rewritten for WebGL;
-butterchurn-presets (MIT) holds the presets Music Assistant's visualizer uses too. The
+butterchurn-presets (MIT) holds the presets. The versions and packs are the ones Music
+Assistant's web interface bundles for its visualizer (Butterchurn 3.0.0-beta.5, presets
+2.4.7 base and extra: 245 presets), so the LEDs show the same presets. The
 bridge runs them in a headless Chromium page. This script downloads the pinned releases
 from npm, checks them against their published SHA-512 and keeps only the files the page
 loads, with their licences, in ``standalone/vendor``. The add-on's Dockerfile runs it;
@@ -33,10 +35,11 @@ PACKAGES = (
     ),
     (
         "butterchurn-presets",
-        "3.0.0-beta.4",
-        "sha512-TbQLUPvGOYMZAtWKoCmBtludh9aQZ6NaMGQU4lvPeadBPy3Du3yNmwBjlTMLP5c5mRWElxQPjTL1PtR7FZK3OQ==",
+        "2.4.7",
+        "sha512-4MdM8ripz/VfH1BCldrIKdAc/1ryJFBDvqlyow6Ivo1frwj0H3duzvSMFC7/wIjAjxb1QpwVHVqGqS9uAFKhpg==",
         {
-            "dist/all.js": "butterchurn-presets.js",
+            "lib/butterchurnPresets.min.js": "butterchurn-presets.min.js",
+            "lib/butterchurnPresetsExtra.min.js": "butterchurn-presets-extra.min.js",
             "LICENSE": "LICENSE.butterchurn-presets",
         },
     ),

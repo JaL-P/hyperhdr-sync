@@ -23,10 +23,12 @@ import logging
 import struct
 import time
 from collections import deque
+from collections.abc import Callable
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import aiohttp
 import numpy as np
+from milkdrop_render import VisualizerPrefs
 
 LOGGER = logging.getLogger("hyperhdr_bridge.milkdrop")
 
@@ -45,6 +47,7 @@ STALE_US = 250_000
 SYNC_FAST_S, SYNC_FAST_COUNT, SYNC_SLOW_S = 0.25, 8, 5.0
 SYNC_SAMPLES = 8
 RECONNECT_S = 5.0
+PREFERENCES_S = 15.0
 RETRY_AFTER_REJECT_S = 300.0
 
 
@@ -146,6 +149,47 @@ class WaveformFeed:
         if due is None or playhead - due_at > STALE_US:
             return None
         return (np.frombuffer(due, np.uint8).astype(np.float32) - 128.0) / 127.0
+
+
+async def preferences_loop(
+    apply: Callable[[VisualizerPrefs], None],
+    session: aiohttp.ClientSession,
+    web_url: str,
+    token: str,
+) -> None:
+    """
+    Follow Music Assistant's visualizer settings; runs until cancelled.
+
+    The settings are the preset mode, the fixed preset, the favourites and beat switch.
+    Music Assistant's web interface keeps them in the user's preferences, so they are read
+    from ``/auth/me`` with the same token as the waveform, every 15 seconds.
+
+    :param apply: Gets the settings each time they are read.
+    :param session: HTTP session.
+    :param web_url: Music Assistant's web address.
+    :param token: A Music Assistant long-lived access token.
+    """
+    url = web_url.rstrip("/") + "/auth/me"
+    headers = {"Authorization": f"Bearer {token}"}
+    last: VisualizerPrefs | None = None
+    while True:
+        try:
+            async with session.get(
+                url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                response.raise_for_status()
+                user = await response.json()
+            preferences = user.get("preferences") if isinstance(user, dict) else None
+            prefs = VisualizerPrefs.from_preferences(
+                preferences if isinstance(preferences, dict) else {}
+            )
+            if prefs != last:
+                LOGGER.info("MilkDrop follows Music Assistant: %s", prefs.describe())
+                last = prefs
+            apply(prefs)
+        except (aiohttp.ClientError, OSError, TimeoutError, ValueError) as err:
+            LOGGER.debug("Cannot read Music Assistant's visualizer settings (%s)", err)
+        await asyncio.sleep(PREFERENCES_S)
 
 
 async def waveform_loop(

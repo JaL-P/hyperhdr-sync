@@ -175,7 +175,7 @@ class UiSettings:
     my_palettes: tuple[MyPalette, ...] = ()
     """The palettes the user made on the page, to pick from again."""
     milkdrop_preset: str = ""
-    """The preset of the MilkDrop effect; empty for a random one every 30 seconds."""
+    """The preset of the MilkDrop effect; empty picks them as Music Assistant does."""
 
 
 @dataclass(frozen=True)
@@ -509,6 +509,7 @@ class WebUi:
             dt, last = now - last, now
             idle = self._idle()
             idle.set_album_colors(self._bridge.engine.album_colors)
+            idle.set_milkdrop_tint(self._bridge.engine.milkdrop_tint)
             if self._preview_mode == "idle":
                 # Without a night light the LEDs go back to HyperHDR: shown as dark.
                 preview_rgb = (
@@ -564,6 +565,8 @@ class WebUi:
                 "presets": renderer.presets,
                 "showing": renderer.now_showing(slot),
                 "unavailable": renderer.unavailable_reason,
+                "follows": renderer.ma_prefs.describe(),
+                "from_music_assistant": renderer.ma_prefs.from_music_assistant,
             }
         return status
 

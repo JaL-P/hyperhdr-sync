@@ -75,7 +75,7 @@ Useful options (`--help` lists all):
 | `--response` | `snappy`, `balanced`, `smooth` |
 | `--latency-ms` | Render this far ahead of the music. Raise it if the lights lag |
 | `--hyperhdr-host`, `--udp-port`, `--web-port`, `--token` | Where HyperHDR is (default: this machine) |
-| `--milkdrop-preset`, `--chromium` | The MilkDrop effect's preset (default: a random one every 30 s) and the Chromium that draws it (see below) |
+| `--milkdrop-preset`, `--chromium` | The MilkDrop effect's preset (default: picked as Music Assistant picks it) and the Chromium that draws it (see below) |
 | `--ma-token` (or `MA_TOKEN`), `--ma-url`, `--milkdrop-player` | Give Liquid and the MilkDrop presets the real sound wave from Music Assistant's MilkDrop Visualizer plugin (see below) |
 | `--ui-port` | Serve the web UI (live view, previews, Apply) on this port, e.g. `8080`, then open `http://127.0.0.1:8080`. Add `--ui-host 0.0.0.0` to reach it from other machines; it has no login |
 
@@ -147,12 +147,22 @@ HyperHDR were grabbing a screen showing it: each LED takes the colour at its edg
 picture. Music Assistant draws those pictures in your browser, so the bridge draws its own:
 it runs [Butterchurn](https://github.com/jberg/butterchurn) (MilkDrop in WebGL) with the
 [butterchurn-presets](https://www.npmjs.com/package/butterchurn-presets) in a headless
-Chromium, on a small 128x72 picture, only while MilkDrop is in use. Pick a preset in the web
-UI, or keep "Random" for a new one every 30 seconds.
+Chromium, on a small 128x72 picture, only while MilkDrop is in use. It mirrors what Music
+Assistant uses:
 
-- **Colours > MilkDrop** keeps each preset's own colours. **Album cover**, a **Palette** or
-  **Your colour** tint the picture like Music Assistant's visualizer does: the picture keeps
-  its brightness and takes its colour from them.
+- **The same presets**: the versions and packs Music Assistant's web interface bundles
+  (Butterchurn 3.0.0-beta.5, butterchurn-presets 2.4.7 base and extra: 245 presets) and its
+  default "high" quality.
+- **Picked the same way**: the preset picker's default, **Same as Music Assistant**, follows
+  your visualizer settings in Music Assistant: random, random from your starred favourites,
+  or a fixed preset, and with beat switch on, a new preset on a downbeat once the set time has
+  passed (2.7 s blends, like Music Assistant). It reads them from your Music Assistant user
+  with the token below; without one it uses Music Assistant's defaults (a random preset,
+  picked when the music starts). You can also pick a preset for the LEDs only.
+- **Coloured the same way**: **Colours > MilkDrop** tints the picture with the cover's colour,
+  as Music Assistant's visualizer does (a colour blend with the track palette's `on_light`,
+  which Sendspin also sends; untinted when the cover has none). **Album cover**, a
+  **Palette** or **Your colour** tint it with those colours instead.
 - With another effect, **Colours > MilkDrop** gives it the colours round the edges of the live
   MilkDrop picture, so they change with it.
 - With the Music Assistant token below, the presets dance to the real sound wave; without it,

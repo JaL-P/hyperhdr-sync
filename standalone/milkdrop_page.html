@@ -7,7 +7,8 @@
      the MilkDrop presets from the waveform the bridge sends; the picture goes back to the
      bridge, which samples it at the LEDs. One visualizer per slot: the LEDs and the web UI's
      preview. -->
-<script src="vendor/butterchurn-presets.js"></script>
+<script src="vendor/butterchurn-presets.min.js"></script>
+<script src="vendor/butterchurn-presets-extra.min.js"></script>
 </head>
 <body>
 <script type="module">
@@ -17,8 +18,12 @@ const params = new URLSearchParams(location.search);
 const WIDTH = Number(params.get("w")) || 128;
 const HEIGHT = Number(params.get("h")) || 72;
 const SLOTS = 2;
-const pack = self.all && (self.all.default || self.all);
-const presets = typeof pack.getPresets === "function" ? pack.getPresets() : pack;
+// The two packs Music Assistant's visualizer loads: 245 presets.
+const presets = {};
+for (const pack of [self.butterchurnPresets, self.butterchurnPresetsExtra]) {
+  const module = pack && (pack.default || pack);
+  if (module) Object.assign(presets, typeof module.getPresets === "function" ? module.getPresets() : module);
+}
 const audio = new AudioContext();
 const reader = document.createElement("canvas");
 reader.width = WIDTH;
@@ -31,7 +36,8 @@ for (let i = 0; i < SLOTS; i++) {
   canvas.width = WIDTH;
   canvas.height = HEIGHT;
   const visualizer = butterchurn.createVisualizer(audio, canvas, {
-    width: WIDTH, height: HEIGHT, pixelRatio: 1, meshWidth: 32, meshHeight: 24,
+    // Music Assistant's default "high" quality.
+    width: WIDTH, height: HEIGHT, pixelRatio: 1, meshWidth: 64, meshHeight: 48, outputFXAA: true,
   });
   slots.push({ canvas, visualizer, preset: null });
 }

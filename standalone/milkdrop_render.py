@@ -23,7 +23,9 @@ import secrets
 import shutil
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from aiohttp import WSMsgType, web
@@ -33,14 +35,17 @@ LOGGER = logging.getLogger("hyperhdr_bridge.milkdrop")
 HERE = Path(__file__).resolve().parent
 PAGE = HERE / "milkdrop_page.html"
 VENDOR = HERE / "vendor"
-VENDOR_FILES = ("butterchurn.min.js", "butterchurn-presets.js")
+VENDOR_FILES = (
+    "butterchurn.min.js",
+    "butterchurn-presets.min.js",
+    "butterchurn-presets-extra.min.js",
+)
 CHROMIUM_NAMES = ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable")
 # The picture Butterchurn draws: small, as only its edges reach the LEDs, and 16:9.
 WIDTH, HEIGHT = 128, 72
 LIVE, PREVIEW = 0, 1
 SLOTS = 2
-# A random preset changes this often, blending over this long, as in Music Assistant.
-CYCLE_S = 30.0
+# How long a preset change blends, as in Music Assistant's visualizer.
 BLEND_S = 2.7
 # A picture older than this is not shown (the renderer stalled or restarted).
 FRESH_S = 0.5
@@ -60,13 +65,71 @@ def find_chromium(path: str | None = None) -> str | None:
     return next((found for name in CHROMIUM_NAMES if (found := shutil.which(name))), None)
 
 
+@dataclass(frozen=True)
+class VisualizerPrefs:
+    """
+    Music Assistant's visualizer settings.
+
+    Its web interface keeps them in the user's preferences; the defaults are its own.
+    """
+
+    mode: str = "random"
+    """``random``, ``random_favorites`` or ``fixed``."""
+    preset: str = ""
+    """The preset of the ``fixed`` mode."""
+    favorites: tuple[str, ...] = ()
+    """The presets starred in Music Assistant."""
+    beat_switch: bool = False
+    """Change to another preset on a downbeat once ``beat_dwell_s`` have passed."""
+    beat_dwell_s: float = 30.0
+    from_music_assistant: bool = False
+    """Whether these were read from Music Assistant (else they are its defaults)."""
+
+    @classmethod
+    def from_preferences(cls, preferences: dict[str, Any]) -> VisualizerPrefs:
+        """
+        Read the visualizer settings from a Music Assistant user's preferences.
+
+        :param preferences: The ``preferences`` of Music Assistant's ``/auth/me``.
+        """
+        mode = str(preferences.get("visualizer_preset_mode") or "random")
+        favorites = preferences.get("visualizer_favorites") or []
+        try:
+            dwell = float(preferences.get("visualizer_beat_dwell", 30))
+        except TypeError, ValueError:
+            dwell = 30.0
+        return cls(
+            mode=mode if mode in ("random", "random_favorites", "fixed") else "random",
+            preset=str(preferences.get("visualizer_preset") or ""),
+            favorites=tuple(str(f) for f in favorites if isinstance(f, str)),
+            beat_switch=bool(preferences.get("visualizer_beat_switch", False)),
+            beat_dwell_s=max(1.0, dwell),
+            from_music_assistant=True,
+        )
+
+    def describe(self) -> str:
+        """Say in a few words how presets are picked."""
+        if self.mode == "fixed" and self.preset:
+            text = f"always {self.preset}"
+        elif self.mode == "random_favorites" and self.favorites:
+            text = f"a random one of your {len(self.favorites)} favourites"
+        else:
+            text = "a random preset"
+        if self.beat_switch:
+            text += f", changing on the beat every {self.beat_dwell_s:.0f} s or more"
+        return text
+
+
 class _Slot:
     """What one visualizer of the page shows: its preset choice and latest picture."""
 
     def __init__(self) -> None:
-        self.wanted = ""  # a preset name; empty means a random one every CYCLE_S
+        self.wanted = ""  # a preset name; empty follows Music Assistant's settings
         self.loaded: str | None = None
+        self.choice_key: tuple[object, ...] | None = None
         self.changed_at = 0.0
+        self.repick = False
+        self.beat_due = False
         self.picture: np.ndarray | None = None
         self.picture_at = 0.0
 
@@ -91,6 +154,7 @@ class MilkdropRenderer:
         self._asked_at = 0.0
         self._rng = random.Random()  # noqa: S311 - picks presets, nothing secret
         self.presets: list[str] = []
+        self.ma_prefs = VisualizerPrefs()
 
     @property
     def unavailable_reason(self) -> str | None:
@@ -112,9 +176,27 @@ class MilkdropRenderer:
         Choose a slot's preset.
 
         :param slot: ``LIVE`` or ``PREVIEW``.
-        :param name: A preset name, or empty for a random one every 30 seconds.
+        :param name: A preset name, or empty to pick them as Music Assistant does.
         """
         self._slots[slot].wanted = name
+
+    def set_ma_prefs(self, prefs: VisualizerPrefs) -> None:
+        """
+        Follow Music Assistant's visualizer settings.
+
+        :param prefs: The settings, read from Music Assistant.
+        """
+        self.ma_prefs = prefs
+
+    def repick(self) -> None:
+        """Pick presets afresh, as Music Assistant does when its visualizer opens."""
+        for state in self._slots:
+            state.repick = True
+
+    def downbeat(self) -> None:
+        """Note a downbeat: with beat switch on, Music Assistant changes preset on one."""
+        for state in self._slots:
+            state.beat_due = True
 
     def now_showing(self, slot: int) -> str | None:
         """Return the name of the preset a slot shows, once the page has loaded one."""
@@ -159,16 +241,27 @@ class MilkdropRenderer:
     # -------------------------------------------------------------- internals
 
     async def _update_preset(self, ws: web.WebSocketResponse, slot: int) -> None:
+        """Load the preset a slot should show now, picked the way Music Assistant picks it."""
         state = self._slots[slot]
         now = time.monotonic()
-        if state.wanted and state.wanted in self.presets:
-            name = state.wanted
-        elif state.loaded is None or state.wanted or now - state.changed_at >= CYCLE_S:
-            choices = [p for p in self.presets if p != state.loaded] or self.presets
-            name = self._rng.choice(choices)
+        prefs = self.ma_prefs
+        key = (state.wanted, prefs.mode, prefs.preset, prefs.favorites)
+        beat_due, state.beat_due = state.beat_due, False
+        if state.loaded is None or key != state.choice_key or state.repick:
+            name = self._choose(state.wanted, prefs, state.loaded, forced=False)
+        elif (
+            beat_due
+            and prefs.beat_switch
+            and not state.wanted
+            and now - state.changed_at >= prefs.beat_dwell_s
+        ):
+            # Beat switch skips the fixed preset, as in Music Assistant.
+            name = self._choose("", prefs, state.loaded, forced=True)
         else:
             return
-        if name == state.loaded:
+        state.choice_key = key
+        state.repick = False
+        if name is None or name == state.loaded:
             return
         blend = 0.0 if state.loaded is None else BLEND_S
         await ws.send_str(
@@ -176,6 +269,20 @@ class MilkdropRenderer:
         )
         state.loaded = name
         state.changed_at = now
+
+    def _choose(
+        self, wanted: str, prefs: VisualizerPrefs, current: str | None, *, forced: bool
+    ) -> str | None:
+        """Pick a preset: the one asked for, else as Music Assistant's settings say."""
+        if wanted in self.presets:
+            return wanted
+        if not forced and prefs.mode == "fixed" and prefs.preset in self.presets:
+            return prefs.preset
+        pool = self.presets
+        if prefs.mode == "random_favorites":
+            pool = [name for name in prefs.favorites if name in self.presets] or pool
+        choices = [name for name in pool if name != current] or pool
+        return self._rng.choice(choices) if choices else None
 
     async def _keep_running(self) -> None:
         """Serve the page and keep Chromium running while pictures are asked for."""

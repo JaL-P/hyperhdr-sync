@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "standalone"))
 
 import milkdrop_render
-from milkdrop_render import LIVE, PREVIEW, MilkdropRenderer
+from milkdrop_render import LIVE, PREVIEW, MilkdropRenderer, VisualizerPrefs
 
 PRESETS = ["alpha", "beta", "gamma"]
 
@@ -119,7 +119,7 @@ async def test_real_presets_render_in_chromium() -> None:
                 frame += 1 if renderer.picture(LIVE) is not None else 0
         picture = renderer.picture(LIVE)
         assert picture is not None
-        assert len(renderer.presets) > 100
+        assert len(renderer.presets) == 245, "the two packs Music Assistant loads"
         assert renderer.now_showing(LIVE) == "martin - mucus cervix"
         assert float(picture.mean()) > 0.05, "the preset draws something"
     finally:
@@ -192,3 +192,184 @@ async def test_bridge_feeds_pictures_to_the_engines_that_show_them() -> None:
     other.milkdrop = cast("Any", idle)
     await other._feed_milkdrop(None)  # noqa: SLF001
     assert idle.waves == {}, "an effect without MilkDrop starts nothing"
+
+
+class _Socket:
+    """Collects the preset messages the renderer sends to the page."""
+
+    def __init__(self) -> None:
+        self.loaded: list[str] = []
+
+    async def send_str(self, text: str) -> None:
+        self.loaded.append(json.loads(text)["name"])
+
+
+async def _step(renderer: MilkdropRenderer, ws: _Socket, slot: int = LIVE) -> str | None:
+    await renderer._update_preset(cast("Any", ws), slot)  # noqa: SLF001
+    return renderer.now_showing(slot)
+
+
+def test_visualizer_prefs_read_music_assistants_settings() -> None:
+    """The settings Music Assistant's web interface saves are read, with its defaults."""
+    defaults = VisualizerPrefs()
+    assert (defaults.mode, defaults.beat_switch, defaults.beat_dwell_s) == ("random", False, 30.0)
+    assert not defaults.from_music_assistant
+    prefs = VisualizerPrefs.from_preferences(
+        {
+            "visualizer_preset_mode": "random_favorites",
+            "visualizer_preset": "beta",
+            "visualizer_favorites": ["alpha", "gamma", 7],
+            "visualizer_beat_switch": True,
+            "visualizer_beat_dwell": 12,
+            "theme": "dark",
+        }
+    )
+    assert prefs.mode == "random_favorites"
+    assert prefs.favorites == ("alpha", "gamma")
+    assert (prefs.beat_switch, prefs.beat_dwell_s, prefs.from_music_assistant) == (True, 12.0, True)
+    assert "2 favourites" in prefs.describe()
+    assert "on the beat every 12 s" in prefs.describe()
+    odd = VisualizerPrefs.from_preferences(
+        {"visualizer_preset_mode": "nonsense", "visualizer_beat_dwell": "x"}
+    )
+    assert (odd.mode, odd.beat_dwell_s) == ("random", 30.0)
+
+
+async def test_presets_are_picked_like_music_assistant(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fixed, favourites, beat switch after the dwell, a new pick on start, or the user's own."""
+    renderer = MilkdropRenderer(chromium=sys.executable)
+    renderer.presets = [f"preset {i}" for i in range(20)]
+    ws = _Socket()
+    clock = [1000.0]
+    monkeypatch.setattr("milkdrop_render.time.monotonic", lambda: clock[0])
+
+    first = await _step(renderer, ws)
+    assert first in renderer.presets, "Music Assistant's default: a random preset"
+    clock[0] += 120
+    assert await _step(renderer, ws) == first, "and it keeps it: no timer"
+    renderer.downbeat()
+    assert await _step(renderer, ws) == first, "beat switch is off by default"
+
+    renderer.set_ma_prefs(
+        VisualizerPrefs(mode="fixed", preset="preset 7", from_music_assistant=True)
+    )
+    assert await _step(renderer, ws) == "preset 7"
+
+    favourites = ("preset 3", "preset 4", "missing")
+    renderer.set_ma_prefs(
+        VisualizerPrefs(
+            mode="random_favorites",
+            favorites=favourites,
+            beat_switch=True,
+            beat_dwell_s=30,
+            from_music_assistant=True,
+        )
+    )
+    picked = await _step(renderer, ws)
+    assert picked in favourites[:2]
+    clock[0] += 10
+    renderer.downbeat()
+    assert await _step(renderer, ws) == picked, "a downbeat before the dwell changes nothing"
+    clock[0] += 25
+    assert await _step(renderer, ws) == picked, "after the dwell, but no downbeat yet"
+    renderer.downbeat()
+    switched = await _step(renderer, ws)
+    assert switched in favourites[:2]
+    assert switched != picked
+
+    renderer.repick()
+    assert await _step(renderer, ws) in favourites[:2], "music starting picks again"
+
+    renderer.set_preset(LIVE, "preset 11")
+    assert await _step(renderer, ws) == "preset 11", "the user's own choice wins"
+    clock[0] += 100
+    renderer.downbeat()
+    assert await _step(renderer, ws) == "preset 11", "and beat switch leaves it alone"
+
+
+async def test_preferences_loop_reads_auth_me(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bridge reads Music Assistant's visualizer settings from /auth/me with its token."""
+    import milkdrop  # noqa: PLC0415
+    from aiohttp import web  # noqa: PLC0415
+    from aiohttp.test_utils import TestServer  # noqa: PLC0415
+
+    seen: list[str | None] = []
+
+    async def auth_me(request: web.Request) -> web.Response:
+        seen.append(request.headers.get("Authorization"))
+        return web.json_response(
+            {
+                "user_id": "1",
+                "preferences": {"visualizer_preset_mode": "fixed", "visualizer_preset": "beta"},
+            }
+        )
+
+    app = web.Application()
+    app.router.add_get("/auth/me", auth_me)
+    server = TestServer(app)
+    await server.start_server()
+    got: list[VisualizerPrefs] = []
+    monkeypatch.setattr(milkdrop, "PREFERENCES_S", 0.01)
+    async with aiohttp.ClientSession() as session:
+        task = asyncio.create_task(
+            milkdrop.preferences_loop(got.append, session, str(server.make_url("")), "token-1")
+        )
+        try:
+            async with asyncio.timeout(5):
+                while len(got) < 2:  # noqa: ASYNC110
+                    await asyncio.sleep(0.01)
+        finally:
+            task.cancel()
+    await server.close()
+    assert seen[0] == "Bearer token-1"
+    assert got[0] == VisualizerPrefs(mode="fixed", preset="beta", from_music_assistant=True)
+
+
+def test_bridge_passes_music_assistants_tint_beats_and_starts() -> None:
+    """Sendspin's on_light becomes the tint; downbeats and music starting reach the renderer."""
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    import hyperhdr_bridge  # noqa: PLC0415
+
+    from hyperhdr_sync.engine import Engine  # noqa: PLC0415
+    from hyperhdr_sync.layout import LedLayout  # noqa: PLC0415
+
+    class Renderer:
+        def __init__(self) -> None:
+            self.downbeats = 0
+            self.repicks = 0
+
+        def downbeat(self) -> None:
+            self.downbeats += 1
+
+        def repick(self) -> None:
+            self.repicks += 1
+
+    bridge = hyperhdr_bridge.Bridge(Engine(LedLayout.strip(10)), cast("Any", None), 0)
+    renderer = Renderer()
+    bridge.milkdrop = cast("Any", renderer)
+    palette = SimpleNamespace(
+        primary=(200, 20, 20),
+        accent=None,
+        background_light=None,
+        background_dark=None,
+        on_dark=(250, 240, 230),
+        on_light=(30, 60, 90),
+    )
+    bridge.on_color(cast("Any", SimpleNamespace(color=palette)))
+    assert bridge.engine.milkdrop_tint == (30, 60, 90)
+    bridge.on_stream_start(
+        cast("Any", SimpleNamespace(payload=SimpleNamespace(visualizer=object())))
+    )
+    assert renderer.repicks == 1
+    beats = [
+        SimpleNamespace(timestamp_us=100, is_downbeat=True),
+        SimpleNamespace(timestamp_us=200, is_downbeat=False),
+    ]
+    bridge._beats = cast("Any", beats)  # noqa: SLF001
+    bridge._drain(300)  # noqa: SLF001
+    assert renderer.downbeats == 1
+    bridge.on_color(
+        cast("Any", SimpleNamespace(color=SimpleNamespace(**{**vars(palette), "on_light": None})))
+    )
+    assert bridge.engine.milkdrop_tint is None
