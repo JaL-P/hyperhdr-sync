@@ -32,6 +32,8 @@ _FLAGS = {
     "album_mode": "--album-mode",
     "night_light": "--night-light",
     "colors": "--colors",
+    "ma_url": "--ma-url",
+    "milkdrop_player": "--milkdrop-player",
 }
 # add-on option -> bridge flag that is given without a value when the option is on
 _SWITCHES = {"steps": "--steps"}
@@ -41,7 +43,7 @@ def options_to_argv(options: dict[str, Any]) -> list[str]:
     """
     Return the bridge's command line for the add-on options.
 
-    The token is left out: it goes through the environment, not the visible command line.
+    The tokens are left out: they go through the environment, not the visible command line.
 
     :param options: The contents of the add-on's options.json.
     """
@@ -86,6 +88,8 @@ def main() -> None:
         sys.exit("Set 'hyperhdr_host' in the add-on configuration to the machine HyperHDR runs on.")
     if token := str(options.get("token") or "").strip():
         os.environ["HYPERHDR_TOKEN"] = token
+    if ma_token := str(options.get("ma_token") or "").strip():
+        os.environ["MA_TOKEN"] = ma_token
     sys.path.insert(0, str(BRIDGE_DIR))
     import hyperhdr_bridge  # noqa: PLC0415
 

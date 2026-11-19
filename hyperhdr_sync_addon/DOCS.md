@@ -33,6 +33,12 @@ the `name` option).
   runs as an add-on here. Otherwise use `ws://MUSIC-ASSISTANT-IP:8927/sendspin`.
 - **API token**: only needed when HyperHDR is on a different subnet. Create one in HyperHDR under
   **Token Management**.
+- **Music Assistant token (MilkDrop waveform)**: optional. With it, the **Liquid** effect draws
+  the real sound wave, like MilkDrop does, instead of a ring shaped by the spectrum. In Music
+  Assistant, enable the **MilkDrop Visualizer** plugin (Settings > Plugins), then create a
+  long-lived token (Settings, your profile) and paste it here. **Music Assistant web address**
+  is only needed when Music Assistant is not on port 8095 of the Sendspin address's host;
+  **MilkDrop player** picks a player by its id instead of the one playing.
 - **Night light**: brightness of the custom colour while no music plays. At 0 (the default) the
   LEDs go back to HyperHDR's screen grabber when the music stops; above 0 they keep glowing in
   the custom colour, so the TV picture is not shown on them until you turn it off.

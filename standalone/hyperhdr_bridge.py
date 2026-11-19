@@ -32,8 +32,12 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 
-# The rendering engine lives in the plugin's folder, next to this folder.
+# The rendering engine lives in the plugin's folder, next to this folder; the bridge's
+# own modules (web UI, MilkDrop waveform) live in this folder.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from milkdrop import WaveformFeed, waveform_loop, web_url_from_sendspin
 
 from hyperhdr_sync.engine import (
     SPECTRUM_BINS,
@@ -106,6 +110,8 @@ class Bridge:
         self.latency_us = latency_ms * 1000
         self.night_light = night_light
         self.client: SendspinClient | None = None
+        # The sound wave from Music Assistant's MilkDrop Visualizer plugin, when set up.
+        self.waveform: WaveformFeed | None = None
         self.streaming = False
         # Settings being tried out in the web UI while music plays. When they differ from
         # the live ones, ``preview`` is a copy of the live engine (same gain, colours and
@@ -265,6 +271,7 @@ class Bridge:
                     self.client.compute_server_time(self.client.now_us()) + self.latency_us
                 )
                 self._drain(playhead_us)
+                self._feed_waveform()
                 rgb = self.engine.render(dt)
                 self.last_preview_rgb = rgb if self.preview is None else self.preview.render(dt)
                 self._stats["peak"] = max(self._stats["peak"], *rgb)
@@ -303,6 +310,16 @@ class Bridge:
                 self._stats["beats"] += 1
                 for engine in engines:
                     engine.beat(1.0 if beat.is_downbeat else 0.8)
+
+    def _feed_waveform(self) -> None:
+        """Give the engines the sound wave sounding now, if the MilkDrop plugin sends it."""
+        if self.waveform is None:
+            return
+        wave = self.waveform.current(self.latency_us)
+        if wave is not None:
+            self.engine.feed(waveform=wave)
+            if self.preview is not None:
+                self.preview.feed(waveform=wave)
 
     def _send(self, rgb: bytes) -> None:
         self.last_rgb = rgb
@@ -523,7 +540,19 @@ async def run(args: argparse.Namespace) -> None:
             if args.demo:
                 await demo_loop(bridge)
             else:
-                await asyncio.gather(bridge.render_loop(), connect_loop(bridge, args, session))
+                loops = [bridge.render_loop(), connect_loop(bridge, args, session)]
+                if ma_token := args.ma_token or os.environ.get("MA_TOKEN"):
+                    web_url = args.ma_url or web_url_from_sendspin(args.server)
+                    bridge.waveform = WaveformFeed()
+                    LOGGER.info(
+                        "Liquid will draw the sound wave from Music Assistant at %s", web_url
+                    )
+                    loops.append(
+                        waveform_loop(
+                            bridge.waveform, session, web_url, ma_token, args.milkdrop_player
+                        )
+                    )
+                await asyncio.gather(*loops)
         finally:
             # Spaced out, so they are not dropped together; the socket closes right after.
             for _ in range(3):
@@ -573,6 +602,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--token", help="HyperHDR API token (or set HYPERHDR_TOKEN); not needed on the same machine"
+    )
+    parser.add_argument(
+        "--ma-token",
+        help="Music Assistant long-lived token (or set MA_TOKEN): with the MilkDrop Visualizer "
+        "plugin enabled, Liquid draws the real sound wave",
+    )
+    parser.add_argument(
+        "--ma-url",
+        help="Music Assistant's web address for the MilkDrop waveform "
+        "(default: the --server host, port 8095)",
+    )
+    parser.add_argument(
+        "--milkdrop-player",
+        help="Music Assistant player id whose sound wave to draw (default: the one playing)",
     )
     parser.add_argument(
         "--effect", default=Effect.SPECTRUM.value, choices=[e.value for e in Effect]

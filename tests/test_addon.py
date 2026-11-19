@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import re
 import sys
@@ -96,6 +97,43 @@ def test_options_parse_as_bridge_arguments() -> None:
     assert args.steps is False
     assert args.token is None
     assert args.ui_supervisor, "the add-on always serves its Ingress panel"
+
+
+def test_milkdrop_options_reach_the_bridge(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The MilkDrop options reach the bridge; the Music Assistant token only via the environment."""
+    run = _load("addon_run", ADDON / "run.py")
+    bridge = _load("hyperhdr_bridge", ROOT / "standalone" / "hyperhdr_bridge.py")
+    options = {
+        **_config()["options"],
+        "hyperhdr_host": "192.168.1.20",
+        "ma_token": "ma-secret",
+        "ma_url": "http://192.168.1.5:8095",
+        "milkdrop_player": "media_player.tv",
+    }
+    argv = run.options_to_argv(options)
+    assert "ma-secret" not in argv
+    args = bridge.parse_args(argv)
+    assert args.ma_url == "http://192.168.1.5:8095"
+    assert args.milkdrop_player == "media_player.tv"
+    assert args.ma_token is None
+    defaults = bridge.parse_args(
+        run.options_to_argv({**_config()["options"], "hyperhdr_host": "x"})
+    )
+    assert (defaults.ma_url, defaults.milkdrop_player) == (None, None)
+    monkeypatch.delenv("MA_TOKEN", raising=False)
+    options_file = tmp_path / "options.json"
+    options_file.write_text(json.dumps(options), encoding="utf-8")
+    monkeypatch.setattr(run, "OPTIONS_FILE", options_file)
+    monkeypatch.setattr(run, "load_container_environment", lambda: None)
+    started: list[list[str]] = []
+    fake = type(sys)("hyperhdr_bridge")
+    fake.main = lambda: started.append(list(sys.argv))  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "hyperhdr_bridge", fake)
+    monkeypatch.setattr(sys, "argv", [])
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    run.main()
+    assert os.environ.pop("MA_TOKEN") == "ma-secret"
+    assert "ma-secret" not in started[0]
 
 
 def test_own_palette_options_reach_the_bridge() -> None:

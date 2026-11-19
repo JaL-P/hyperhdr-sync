@@ -75,6 +75,7 @@ Useful options (`--help` lists all):
 | `--response` | `snappy`, `balanced`, `smooth` |
 | `--latency-ms` | Render this far ahead of the music. Raise it if the lights lag |
 | `--hyperhdr-host`, `--udp-port`, `--web-port`, `--token` | Where HyperHDR is (default: this machine) |
+| `--ma-token` (or `MA_TOKEN`), `--ma-url`, `--milkdrop-player` | Let Liquid draw the real sound wave from Music Assistant's MilkDrop Visualizer plugin (see below) |
 | `--ui-port` | Serve the web UI (live view, previews, Apply) on this port, e.g. `8080`, then open `http://127.0.0.1:8080`. Add `--ui-host 0.0.0.0` to reach it from other machines; it has no login |
 
 The Home Assistant add-on has the same web UI in the sidebar, where applied settings are also
@@ -135,7 +136,24 @@ off while Music Assistant starts, and re-reads the layout when music starts.
 | Aurora | Slow, folded curtains of colour rising from the bottom. Inspired by Paraline |
 | Horizon | A sun at the top pulsing with the bass, grid lines rushing down the sides. Inspired by Paraline |
 | Side bars | Bars growing from the middle of each side: bass left, treble right. Inspired by Paraline |
-| Liquid | Swirling trails that zoom, twist and fade into themselves. In the style of MilkDrop |
+| Liquid | Swirling trails that zoom, twist and fade into themselves. In the style of MilkDrop; draws the real sound wave with the MilkDrop plugin (below) |
+
+### The real sound wave for Liquid
+
+Music Assistant's **MilkDrop Visualizer** plugin streams the sound wave of what a player plays
+(small 8-bit snapshots, about 43 a second, taken from the audio Music Assistant decodes anyway).
+With it, Liquid draws that wave as its ring, the way MilkDrop does, in time with the lights.
+
+1. In Music Assistant, enable the plugin under **Settings > Plugins**.
+2. Create a long-lived token in Music Assistant (**Settings**, your profile).
+3. Put it in the add-on's **Music Assistant token** option, or give the standalone bridge
+   `--ma-token` (or set `MA_TOKEN`).
+
+The bridge looks for Music Assistant on port 8095 of the Sendspin address's host; set
+`--ma-url` (`ma_url`) if it is elsewhere. It follows whichever player is playing; set
+`--milkdrop-player` (`milkdrop_player`) to a player id to pick one. Without a token Liquid uses
+a ring shaped by the spectrum. The plugin is marked experimental in Music Assistant, so a
+Music Assistant update may change it.
 
 Brightness adapts to each track by itself: every frequency band is scaled against its own recent
 maximum, so quiet and loud recordings both use the full range.

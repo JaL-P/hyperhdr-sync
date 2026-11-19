@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.2
+
+- Liquid can draw the real sound wave, as MilkDrop does, from Music Assistant's MilkDrop
+  Visualizer plugin: enable the plugin in Music Assistant and put a Music Assistant long-lived
+  token in the new **Music Assistant token** option. The waveform keeps in time with the
+  lights (the same latency). Without a token, Liquid keeps its spectrum-shaped ring.
+- New options: `ma_token`, `ma_url` (only when Music Assistant is not on port 8095 of the
+  Sendspin host) and `milkdrop_player` (a player id; empty follows the one playing).
+
 ## 0.5.1
 
 - A new effect, Liquid: a picture that keeps zooming, twisting and fading into itself while the

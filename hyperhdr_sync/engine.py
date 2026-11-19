@@ -71,6 +71,8 @@ _MAX_PARTICLES: int = 48
 # Liquid: the size of the picture it swirls (across, down) and the points on its ring.
 _LIQUID_W, _LIQUID_H = 48, 27
 _LIQUID_RING = 160
+# How long a waveform from the MilkDrop plugin is drawn before Liquid falls back to the spectrum.
+_WAVE_FRESH_S = 0.3
 
 
 class Effect(StrEnum):
@@ -420,6 +422,9 @@ class Engine:
         self._liquid = np.zeros((_LIQUID_H, _LIQUID_W, 3), np.float32)
         self._liquid_spin = 0.0
         self._liquid_hue = 0.0
+        self._liquid_peak = 0.05
+        self._wave: np.ndarray | None = None
+        self._wave_at = 0.0
 
     def feed(
         self,
@@ -427,6 +432,7 @@ class Engine:
         loudness: int | None = None,
         spectrum: Sequence[int] | np.ndarray | None = None,
         onset: int | None = None,
+        waveform: np.ndarray | None = None,
     ) -> None:
         """
         Feed the feature values that became audible.
@@ -435,7 +441,14 @@ class Engine:
         :param spectrum: Visualizer ``spectrum`` bins (0-65535 each, dB-linear),
             requested with the ``SPECTRUM_*`` constants of this module.
         :param onset: Visualizer ``peak`` onset strength (1-255).
+        :param waveform: The sound wave sounding now (samples in -1..1), from Music
+            Assistant's MilkDrop Visualizer plugin; Liquid draws it as its ring.
         """
+        if waveform is not None and len(waveform) >= 2:
+            wave = np.asarray(waveform, np.float32)
+            at = np.linspace(0.0, wave.size - 1, _LIQUID_RING, dtype=np.float32)
+            self._wave = np.interp(at, np.arange(wave.size), wave).astype(np.float32)
+            self._wave_at = self._time
         if loudness is not None:
             self._loudness_db = _u16_to_db(float(loudness))
             self._has_loudness = True
@@ -1037,7 +1050,8 @@ class Engine:
         Swirl a small picture into itself, MilkDrop style, and show its edges on the LEDs.
 
         Every frame the picture is zoomed out from the middle, twisted, rippled and faded a
-        little; then a ring shaped by the spectrum is drawn into it. So what the music drew
+        little; then a ring is drawn into it: the real sound wave when Music Assistant's
+        MilkDrop Visualizer plugin provides it, else a ring shaped by the spectrum. So what the music drew
         a moment ago spreads out to the screen's edges as glowing trails. Beats kick the
         zoom and turn the twist round.
 
@@ -1062,10 +1076,20 @@ class Engine:
         # The ring: its radius at each angle follows one band of the spectrum, mirrored so
         # the bass sits at the sides and the treble at the top and bottom.
         theta = np.linspace(0.0, 2.0 * math.pi, _LIQUID_RING, endpoint=False, dtype=np.float32)
-        fold = np.abs(np.cos(theta)) * (SPECTRUM_BINS - 1)
-        bands = np.interp(fold, np.arange(SPECTRUM_BINS), self._bands).astype(np.float32)
-        radius = 0.12 + 0.3 * bands + 0.08 * self._pulse
-        shade = (0.35 + 0.65 * bands) * self._level
+        if self._wave is not None and self._time - self._wave_at < _WAVE_FRESH_S:
+            # The real sound wave, bent round into a ring as MilkDrop draws it: mirrored
+            # so its two ends meet, and scaled to its recent peak so quiet tracks show too.
+            wave = 0.5 * (self._wave + self._wave[::-1])
+            peak = float(np.abs(wave).max())
+            self._liquid_peak = max(peak, self._liquid_peak * 0.97**frames, 0.05)
+            shape = wave / self._liquid_peak
+            radius = 0.24 + 0.16 * shape + 0.08 * self._pulse
+            shade = (0.55 + 0.45 * np.abs(shape)) * self._level
+        else:
+            fold = np.abs(np.cos(theta)) * (SPECTRUM_BINS - 1)
+            bands = np.interp(fold, np.arange(SPECTRUM_BINS), self._bands).astype(np.float32)
+            radius = 0.12 + 0.3 * bands + 0.08 * self._pulse
+            shade = (0.35 + 0.65 * bands) * self._level
         colors = _sample_wrap(self._lut_cyclic, theta / (2.0 * math.pi) + self._liquid_hue)
         _splat(picture, radius * np.cos(theta), radius * np.sin(theta), colors * shade[:, None])
         self._liquid = np.minimum(picture, 1.5).astype(np.float32)

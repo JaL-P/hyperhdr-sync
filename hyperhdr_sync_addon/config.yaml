@@ -1,5 +1,5 @@
 name: "HyperHDR Sync"
-version: "0.5.1"
+version: "0.5.2"
 slug: "hyperhdr_sync"
 description: "Makes your HyperHDR LEDs react to the music Music Assistant plays"
 url: "https://github.com/JaL-P/hyperhdr-sync"
@@ -63,4 +63,9 @@ schema:
   udp_port: "port"
   web_port: "port"
   token: "password?"
+  # Music Assistant long-lived token: Liquid then draws the real sound wave from the
+  # MilkDrop Visualizer plugin
+  ma_token: "password?"
+  ma_url: "url?"
+  milkdrop_player: "str?"
   log_level: "list(debug|info|warning|error)"
