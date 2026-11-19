@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import struct
 import sys
-import time
 from pathlib import Path
 
 import aiohttp
@@ -18,18 +16,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "standalone"))
 
 import milkdrop
 
-from hyperhdr_sync.engine import Effect, Engine, EngineSettings
+from hyperhdr_sync.engine import WAVE_SAMPLES, Effect, Engine, EngineSettings, bytes_to_wave
 from hyperhdr_sync.layout import LedLayout
 
-
-def _now_us() -> int:
-    return int(time.monotonic() * 1_000_000)
+_now_us = milkdrop._now_us  # noqa: SLF001
 
 
 def _frame(play_at_us: int, value: int = 200) -> bytes:
-    samples = np.full(milkdrop.WAVE_SAMPLES, value, np.uint8)
+    samples = np.full(WAVE_SAMPLES, value, np.uint8)
     samples[::2] = 255 - value  # a square wave, so it is not flat
-    return struct.pack(">Bq", milkdrop.WAVE_TAG, play_at_us) + samples.tobytes()
+    return milkdrop._HEADER.pack(milkdrop.WAVE_TAG, play_at_us) + samples.tobytes()  # noqa: SLF001
 
 
 def test_addresses() -> None:
@@ -58,9 +54,10 @@ def test_feed_hands_out_the_frame_sounding_now() -> None:
     assert abs(feed.offset_us - 10_000_000) < 50_000
     feed.add_frame(_frame(now + 10_000_000 - 100_000, 200))
     feed.add_frame(_frame(now + 10_000_000 + 400_000, 60))
-    wave = feed.current()
-    assert wave is not None
-    assert wave.shape == (milkdrop.WAVE_SAMPLES,)
+    data = feed.current()
+    assert data is not None
+    wave = bytes_to_wave(data)
+    assert wave.shape == (WAVE_SAMPLES,)
     assert float(wave.max()) <= 1.0
     assert float(wave.min()) >= -1.0
     assert wave[1] > 0.5, "the frame due now, not the one after it"
@@ -123,9 +120,9 @@ async def test_waveform_loop_against_a_relay() -> None:
         task = asyncio.create_task(milkdrop.waveform_loop(feed, session, url, "good", "tv"))
         try:
             async with asyncio.timeout(5):
-                while (wave := feed.current(ahead_us=400_000)) is None:  # noqa: ASYNC110
+                while (data := feed.current(ahead_us=400_000)) is None:  # noqa: ASYNC110
                     await asyncio.sleep(0.02)
-            assert feed.connected
+            wave = bytes_to_wave(data)
             assert wave[0] < 0 < wave[1]
             assert players == ["tv"]
         finally:
@@ -142,7 +139,7 @@ def test_liquid_draws_the_waveform() -> None:
     """With a waveform Liquid draws it as its ring; in silence it still goes dark."""
     layout = LedLayout.strip(40)
     engines = [Engine(layout, EngineSettings(effect=Effect.LIQUID)) for _ in range(2)]
-    t = np.linspace(0.0, 1.0, milkdrop.WAVE_SAMPLES, dtype=np.float32)
+    t = np.linspace(0.0, 1.0, WAVE_SAMPLES, dtype=np.float32)
     wave = (0.6 * np.sin(2.0 * np.pi * 9.0 * t)).astype(np.float32)
     frames: list[bytes] = []
     for engine in engines:

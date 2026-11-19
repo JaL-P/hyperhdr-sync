@@ -18,6 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "standalone"))
 import milkdrop_render
 from milkdrop_render import LIVE, PREVIEW, MilkdropRenderer, VisualizerPrefs
 
+from hyperhdr_sync.engine import WAVE_SAMPLES
+
 PRESETS = ["alpha", "beta", "gamma"]
 
 
@@ -32,10 +34,10 @@ async def _fake_page(url: str, seen: list[tuple[int, str]]) -> None:
                 seen.append((data["slot"], data["name"]))
             elif message.type == aiohttp.WSMsgType.BINARY:
                 slot, wave = message.data[0], message.data[1:]
-                assert len(wave) == milkdrop_render.WAVE_SAMPLES
+                assert len(wave) == WAVE_SAMPLES
                 # The picture is the slot's colour, brighter for a louder wave.
                 level = min(255, 40 + abs(wave[0] - 128) * 2)
-                color = (level, 0, 0) if slot == LIVE else (0, 0, level)
+                color = (level, 0, 0, 255) if slot == LIVE else (0, 0, level, 255)
                 pixels = bytes(color) * (milkdrop_render.WIDTH * milkdrop_render.HEIGHT)
                 await ws.send_bytes(bytes([slot]) + pixels)
 
@@ -58,7 +60,7 @@ async def test_renderer_trades_waveforms_for_pictures(
     renderer = MilkdropRenderer(chromium=sys.executable, vendor=tmp_path)
     assert renderer.unavailable_reason is None
     renderer.set_preset(LIVE, "beta")
-    wave = bytes([200]) * milkdrop_render.WAVE_SAMPLES
+    wave = bytes([200]) * WAVE_SAMPLES
     try:
         async with asyncio.timeout(5):
             while renderer.picture(LIVE) is None or renderer.picture(PREVIEW) is None:
@@ -108,7 +110,7 @@ async def test_real_presets_render_in_chromium() -> None:
     if renderer.unavailable_reason is not None:
         pytest.skip(renderer.unavailable_reason)
     renderer.set_preset(LIVE, "martin - mucus cervix")
-    samples = np.arange(milkdrop_render.WAVE_SAMPLES)
+    samples = np.arange(WAVE_SAMPLES)
     try:
         async with asyncio.timeout(60):
             frame = 0
@@ -181,7 +183,7 @@ async def test_bridge_feeds_pictures_to_the_engines_that_show_them() -> None:
         live_rgb = np.frombuffer(bridge.engine.render(1 / 60), np.uint8).reshape(-1, 3)
         preview_rgb = np.frombuffer(preview.render(1 / 60), np.uint8).reshape(-1, 3)
     assert stub.presets == {LIVE: "alpha", PREVIEW: "beta"}
-    assert len(stub.waves[LIVE]) == milkdrop_render.WAVE_SAMPLES, "made from the spectrum"
+    assert len(stub.waves[LIVE]) == WAVE_SAMPLES, "made from the spectrum"
     assert live_rgb[:, 0].min() > 100
     assert live_rgb[:, 1].max() == 0
     assert preview_rgb[:, 1].min() > 100

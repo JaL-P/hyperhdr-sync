@@ -80,7 +80,10 @@ _PICTURE_FRESH_S = 0.5
 _PICTURE_PALETTE_S, _PICTURE_PALETTE_TAU = 0.1, 0.4
 _PICTURE_DEPTHS = (0.97, 0.9, 0.83)
 # The waveform made from the spectrum when Music Assistant's real one is not available.
-_SYNTH_SAMPLES, _SYNTH_RATE = 1024, 44100.0
+_SYNTH_RATE = 44100.0
+# MilkDrop's waveform: this many samples, as unsigned bytes with 128 as zero (the format of
+# Music Assistant's MilkDrop plugin and of Butterchurn).
+WAVE_SAMPLES: int = 1024
 
 
 class Effect(StrEnum):
@@ -327,25 +330,7 @@ class Engine:
         )
         self._liquid_grid = (grid_u, grid_v)
         self._liquid_at = ((x * 2.0 - 1.0) * 0.92, (y * 2.0 - 1.0) * 0.92)
-        # MilkDrop: where each LED reads the picture (-1..1), at a few depths straight in
-        # from its edge, and the LEDs in order round the screen (for the MilkDrop palette).
-        across, down = x * 2.0 - 1.0, y * 2.0 - 1.0
-        self._picture_reads = [
-            (
-                np.where(self._side, across * depth, across * _PICTURE_DEPTHS[0]),
-                np.where(self._side, down * _PICTURE_DEPTHS[0], down * depth),
-            )
-            for depth in _PICTURE_DEPTHS
-        ]
-        self._ring_order = np.argsort(self._ring, kind="stable")
-        self._picture: np.ndarray | None = None
-        self._picture_at = -math.inf
-        self._picture_palette_due = 0.0
-        self._milkdrop_tint: np.ndarray | None = None
-        # The waveform made from the spectrum: a sine at the middle of each band.
-        self._synth_freqs = np.geomspace(SPECTRUM_F_MIN, SPECTRUM_F_MAX, SPECTRUM_BINS)
-        self._synth_phase = np.random.default_rng(5).random(SPECTRUM_BINS) * 2.0 * math.pi
-        self._synth_t = np.arange(_SYNTH_SAMPLES) / _SYNTH_RATE
+        self._setup_milkdrop(x, y)
         # Crystals: fixed shards around the screen, each tied to one frequency band.
         shards = max(4, count // 14)
         shard_rng = np.random.default_rng(11)
@@ -360,6 +345,41 @@ class Engine:
         self._rebuild_palette()
         self._out = np.zeros((count, 3), np.float32)
         self.reset()
+
+    def _setup_milkdrop(self, x: np.ndarray, y: np.ndarray) -> None:
+        """
+        Work out what the MilkDrop effect and palette and the made-up waveform need per LED.
+
+        :param x: The LEDs' positions across the screen, 0..1.
+        :param y: The LEDs' positions down the screen, 0..1.
+        """
+        # MilkDrop: where each LED reads the picture (-1..1), at a few depths straight in
+        # from its edge, and the LEDs in order round the screen (for the MilkDrop palette).
+        across, down = x * 2.0 - 1.0, y * 2.0 - 1.0
+        self._picture_reads = [
+            (
+                np.where(self._side, across * depth, across * _PICTURE_DEPTHS[0]),
+                np.where(self._side, down * _PICTURE_DEPTHS[0], down * depth),
+            )
+            for depth in _PICTURE_DEPTHS
+        ]
+        # The pixels and weights those reads blend, worked out once per picture size.
+        self._picture_taps: tuple[tuple[int, ...], np.ndarray, np.ndarray] | None = None
+        self._ring_order = np.argsort(self._ring, kind="stable")
+        self._ring_sorted = self._ring[self._ring_order]
+        self._lut_at = np.arange(_LUT_SIZE) / _LUT_SIZE
+        self._picture: np.ndarray | None = None
+        self._picture_at = -math.inf
+        self._picture_palette_due = 0.0
+        self._milkdrop_tint: tuple[int, int, int] | None = None
+        # The waveform made from the spectrum: a sine at the middle of each band. Each
+        # frame only shifts their phases, so the sines and cosines are worked out once.
+        self._synth_freqs = np.geomspace(SPECTRUM_F_MIN, SPECTRUM_F_MAX, SPECTRUM_BINS)
+        base = 2.0 * math.pi * np.outer(self._synth_freqs, np.arange(WAVE_SAMPLES) / _SYNTH_RATE)
+        base += np.random.default_rng(5).random(SPECTRUM_BINS)[:, None] * 2.0 * math.pi
+        self._synth_sin, self._synth_cos = np.sin(base), np.cos(base)
+        # Where a waveform is resampled to the points of Liquid's ring.
+        self._wave_points = np.linspace(0.0, WAVE_SAMPLES - 1, _LIQUID_RING, dtype=np.float32)
 
     # ------------------------------------------------------------------ inputs
 
@@ -396,16 +416,13 @@ class Engine:
         :param color: The colour (RGB 0-255), or None.
         """
         self._milkdrop_tint = (
-            None if color is None else np.array(color[:3], np.float32).reshape(1, 3) / 255.0
+            None if color is None else (int(color[0]), int(color[1]), int(color[2]))
         )
 
     @property
     def milkdrop_tint(self) -> tuple[int, int, int] | None:
         """The colour given to :meth:`set_milkdrop_tint`, if any."""
-        if self._milkdrop_tint is None:
-            return None
-        r, g, b = (round(float(c) * 255.0) for c in self._milkdrop_tint[0])
-        return (r, g, b)
+        return self._milkdrop_tint
 
     def set_album_colors(self, colors: Iterable[Sequence[int]] | None) -> None:
         """
@@ -519,7 +536,7 @@ class Engine:
             self._picture_at = self._time
         if waveform is not None and len(waveform) >= 2:
             wave = np.asarray(waveform, np.float32)
-            at = np.linspace(0.0, wave.size - 1, _LIQUID_RING, dtype=np.float32)
+            at = self._wave_points * ((wave.size - 1) / (WAVE_SAMPLES - 1))
             self._wave = np.interp(at, np.arange(wave.size), wave).astype(np.float32)
             self._wave_at = self._time
         if loudness is not None:
@@ -583,7 +600,7 @@ class Engine:
             Effect.MILKDROP: lambda: self._fx_milkdrop(dt),
         }
         if self.settings.palette == Palette.MILKDROP and self.settings.effect != Effect.MILKDROP:
-            self._follow_picture_colors(dt)
+            self._follow_picture_colors()
         frame = effects[self.settings.effect]()
         # Manual is a fixed light: it stays on through quiet passages.
         gate = 1.0 if self.settings.effect == Effect.MANUAL else self._gate
@@ -1172,11 +1189,6 @@ class Engine:
         frame: np.ndarray = _bilinear(self._liquid, *self._liquid_at)
         return frame
 
-    @property
-    def uses_milkdrop(self) -> bool:
-        """Whether the settings need MilkDrop pictures (the MilkDrop effect or palette)."""
-        return self.settings.uses_milkdrop
-
     def has_fresh_picture(self) -> bool:
         """Whether a MilkDrop picture arrived recently enough to show."""
         return self._picture is not None and self._time - self._picture_at < _PICTURE_FRESH_S
@@ -1192,13 +1204,15 @@ class Engine:
         """
         amplitude = self._bands.astype(np.float64) ** 1.5
         amplitude[:3] *= 1.0 + 1.5 * self._pulse
-        phases = 2.0 * math.pi * np.outer(self._synth_freqs, self._synth_t + self._time)
-        wave = amplitude @ np.sin(phases + self._synth_phase[:, None])
+        # sin(base + shift) = sin(base) cos(shift) + cos(base) sin(shift)
+        shift = 2.0 * math.pi * self._synth_freqs * self._time
+        wave = (amplitude * np.cos(shift)) @ self._synth_sin + (
+            amplitude * np.sin(shift)
+        ) @ self._synth_cos
         peak = float(np.abs(wave).max())
         if peak < 1e-6 or self._level < 0.01:
-            return bytes([128]) * _SYNTH_SAMPLES
-        wave *= (0.2 + 0.7 * self._level) / peak
-        return bytes(np.rint(np.clip(wave, -1.0, 1.0) * 127.0 + 128.0).astype(np.uint8))
+            return wave_to_bytes(np.zeros(WAVE_SAMPLES))
+        return wave_to_bytes(wave * ((0.2 + 0.7 * self._level) / peak))
 
     def _read_picture(self) -> np.ndarray:
         """
@@ -1207,10 +1221,18 @@ class Engine:
         With the MilkDrop palette the picture is tinted as Music Assistant shows it.
         """
         assert self._picture is not None
-        reads = [_bilinear(self._picture, u, v) for u, v in self._picture_reads]
-        colors: np.ndarray = np.mean(reads, axis=0)
+        shape = self._picture.shape
+        if self._picture_taps is None or self._picture_taps[0] != shape:
+            taps = [_bilinear_taps(shape[0], shape[1], u, v) for u, v in self._picture_reads]
+            index = np.concatenate([t[0] for t in taps], axis=1)
+            weight = np.concatenate([t[1] for t in taps], axis=1) / len(taps)
+            self._picture_taps = (shape, index, weight)
+        _, index, weight = self._picture_taps
+        pixels = self._picture.reshape(-1, 3)[index]
+        colors: np.ndarray = np.einsum("nk,nkc->nc", weight, pixels).astype(np.float32)
         if self.settings.palette == Palette.MILKDROP and self._milkdrop_tint is not None:
-            colors = _blend_color(colors, np.broadcast_to(self._milkdrop_tint, colors.shape))
+            tint = np.array(self._milkdrop_tint, np.float32) / 255.0
+            colors = _blend_color(colors, np.broadcast_to(tint, colors.shape))
         return colors
 
     def _fx_milkdrop(self, dt: float) -> np.ndarray:
@@ -1230,9 +1252,8 @@ class Engine:
             colors = _blend_color(colors, _sample_wrap(self._lut_cyclic, self._ring))
         return colors
 
-    def _follow_picture_colors(self, dt: float) -> None:
+    def _follow_picture_colors(self) -> None:
         """Turn the colours round the edges of the live picture into the palette."""
-        del dt
         if not self.has_fresh_picture() or self._time < self._picture_palette_due:
             return
         self._picture_palette_due = self._time + _PICTURE_PALETTE_S
@@ -1243,10 +1264,9 @@ class Engine:
         if lit.sum() < 2:
             return
         colors = colors[lit] / peak[lit]
-        ring = self._ring[self._ring_order][lit]
-        at = np.arange(_LUT_SIZE) / _LUT_SIZE
+        ring = self._ring_sorted[lit]
         table = np.stack(
-            [np.interp(at, ring, colors[:, c], period=1.0) for c in range(3)], axis=1
+            [np.interp(self._lut_at, ring, colors[:, c], period=1.0) for c in range(3)], axis=1
         ).astype(np.float32)
         follow = _alpha(_PICTURE_PALETTE_S, _PICTURE_PALETTE_TAU)
         self._lut_cyclic += (table - self._lut_cyclic) * follow
@@ -1461,6 +1481,57 @@ def _bilinear(picture: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray:
     bottom = picture[y0 + 1, x0] * (1 - fx) + picture[y0 + 1, x0 + 1] * fx
     result: np.ndarray = (top * (1 - fy) + bottom * fy) * inside[..., None]
     return result
+
+
+def wave_to_bytes(wave: np.ndarray) -> bytes:
+    """
+    Encode a waveform as MilkDrop takes it: unsigned bytes, 128 being zero.
+
+    :param wave: Samples in -1..1 (clipped).
+    """
+    return bytes(np.rint(np.clip(wave, -1.0, 1.0) * 127.0 + 128.0).astype(np.uint8))
+
+
+def bytes_to_wave(data: bytes) -> np.ndarray:
+    """
+    Decode a waveform from unsigned bytes (128 being zero) to samples in -1..1.
+
+    :param data: The encoded waveform.
+    """
+    wave: np.ndarray = (np.frombuffer(data, np.uint8).astype(np.float32) - 128.0) / 127.0
+    return wave
+
+
+def _bilinear_taps(
+    height: int, width: int, u: np.ndarray, v: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Return what :func:`_bilinear` blends at fixed points: four pixel indices and weights each.
+
+    :param height: Rows of the picture.
+    :param width: Columns of the picture.
+    :param u: Across, -1 (left) to 1 (right).
+    :param v: Down, -1 (top) to 1 (bottom).
+    :return: Indices into the flattened picture and their weights, shaped (points, 4); a
+        point outside the picture has zero weights.
+    """
+    x = (u + 1.0) * 0.5 * (width - 1)
+    y = (v + 1.0) * 0.5 * (height - 1)
+    inside = ((x >= 0) & (x <= width - 1) & (y >= 0) & (y <= height - 1)).astype(np.float32)
+    x = np.clip(x, 0, width - 1)
+    y = np.clip(y, 0, height - 1)
+    x0 = np.minimum(x.astype(np.intp), width - 2)
+    y0 = np.minimum(y.astype(np.intp), height - 2)
+    fx, fy = x - x0, y - y0
+    index = np.stack(
+        [y0 * width + x0, y0 * width + x0 + 1, (y0 + 1) * width + x0, (y0 + 1) * width + x0 + 1],
+        axis=1,
+    )
+    weight = (
+        np.stack([(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy], axis=1)
+        * inside[:, None]
+    )
+    return index, weight.astype(np.float32)
 
 
 def _luminosity(colors: np.ndarray) -> np.ndarray:

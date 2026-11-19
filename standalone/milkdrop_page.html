@@ -29,6 +29,7 @@ const reader = document.createElement("canvas");
 reader.width = WIDTH;
 reader.height = HEIGHT;
 const readerContext = reader.getContext("2d", { willReadFrequently: true });
+const out = new Uint8Array(1 + WIDTH * HEIGHT * 4);
 
 const slots = [];
 for (let i = 0; i < SLOTS; i++) {
@@ -58,21 +59,15 @@ socket.onmessage = (event) => {
     }
     return;
   }
-  // [slot][1024 waveform bytes, 128 = zero] in; [slot][R G B per pixel, row by row] out.
+  // [slot][1024 waveform bytes, 128 = zero] in; [slot][R G B A per pixel, row by row] out.
   const data = new Uint8Array(event.data);
   const slot = slots[data[0]];
   if (!slot || slot.preset === null) return;
   const wave = data.subarray(1);
   slot.visualizer.render({ audioLevels: { timeByteArray: wave, timeByteArrayL: wave, timeByteArrayR: wave } });
   readerContext.drawImage(slot.canvas, 0, 0);
-  const rgba = readerContext.getImageData(0, 0, WIDTH, HEIGHT).data;
-  const out = new Uint8Array(1 + WIDTH * HEIGHT * 3);
   out[0] = data[0];
-  for (let i = 0, j = 1; i < rgba.length; i += 4, j += 3) {
-    out[j] = rgba[i];
-    out[j + 1] = rgba[i + 1];
-    out[j + 2] = rgba[i + 2];
-  }
+  out.set(readerContext.getImageData(0, 0, WIDTH, HEIGHT).data, 1);
   socket.send(out);
 };
 </script>

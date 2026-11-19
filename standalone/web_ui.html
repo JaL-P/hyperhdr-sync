@@ -142,7 +142,6 @@
   .milkdrop-row { display: flex; gap: 8px; align-items: center; }
   .milkdrop-row select { flex: 1; width: 0; min-width: 0; text-overflow: ellipsis; padding: 7px 10px; border: 1px solid var(--input); border-radius: 9px; background: var(--card); color: var(--text); font: inherit; font-size: 14px; }
   .milkdrop-row .chip-btn { margin-left: 0; background: var(--card); }
-  .milkdrop-box .hint { margin: 0; }
   .tile .tip { margin: -4px 14px 12px; font-size: 13px; line-height: 1.4; color: var(--muted); }
   .tile.on { border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: var(--accent-soft); box-shadow: 0 0 28px -12px var(--accent); }
   .tile.on .pick { color: var(--accent); }
@@ -479,6 +478,10 @@
     milkdrop_preset: "MilkDrop preset",
   };
   const SLIDERS = ["brightness", "sensitivity", "latency_ms", "night_light"];
+  // Palettes that are colour sources of their own rather than picks in the palette grid,
+  // and those (with your own palette) the grid does not remember as the last one picked.
+  const SOURCES = ["album", "custom", "milkdrop"];
+  const NOT_REMEMBERED = [...SOURCES, "mine"];
   // Every effect, grouped by mood; all of them are always shown.
   const MOODS = [
     ["calm", "Calm", ["lumina", "ambient", "colora", "aurora", "braids", "embers", "snowfall", "manual"]],
@@ -666,10 +669,7 @@
 
   function radio(button, checked) { button.setAttribute("aria-checked", String(checked)); }
   function source() {
-    if (ui.pending.palette === "album") return "album";
-    if (ui.pending.palette === "custom") return "custom";
-    if (ui.pending.palette === "milkdrop") return "milkdrop";
-    return "palette";
+    return SOURCES.includes(ui.pending.palette) ? ui.pending.palette : "palette";
   }
 
   function renderEffects() {
@@ -760,7 +760,7 @@
     $("colours-hint").textContent = manual ? "Solid colour uses one colour"
       : p.palette === "milkdrop" ? (p.effect === "milkdrop" ? "As Music Assistant shows it: tinted with the cover's colour" : "The colours of the live MilkDrop picture")
       : p.effect === "milkdrop" ? "Tints the MilkDrop picture, like Music Assistant" : "";
-    const builtIn = ui.palettes.filter((x) => !["album", "custom", "milkdrop"].includes(x.id));
+    const builtIn = ui.palettes.filter((x) => !SOURCES.includes(x.id));
     const milkdrop = ui.palettes.find((x) => x.id === "milkdrop");
     const album = ui.palettes.find((x) => x.id === "album");
     const current = source();
@@ -780,9 +780,7 @@
       b.setAttribute("role", "radio");
       radio(b, current === id);
       b.addEventListener("click", () => {
-        if (id === "album") setPending({ palette: "album" });
-        else if (id === "custom") setPending({ palette: "custom" });
-        else if (id === "milkdrop") setPending({ palette: "milkdrop" });
+        if (SOURCES.includes(id)) setPending({ palette: id });
         else if (current !== "palette") setPending({ palette: ui.lastPalette || (builtIn[0] && builtIn[0].id) || "rainbow" });
       });
       box.append(b);
@@ -1056,7 +1054,7 @@
   }
 
   function setPending(change, { keepFocus } = {}) {
-    if (change.palette && !["album", "custom", "mine", "milkdrop"].includes(change.palette)) ui.lastPalette = change.palette;
+    if (change.palette && !NOT_REMEMBERED.includes(change.palette)) ui.lastPalette = change.palette;
     ui.pending = { ...ui.pending, ...change };
     ui.message = null;
     sendPreview();
@@ -1161,7 +1159,7 @@
     ui.responses = state.responses;
     ui.ranges = state.ranges;
     if (state.settings.night_light > 0) ui.lastGlow = state.settings.night_light;
-    if (!["album", "custom", "mine", "milkdrop"].includes(state.settings.palette)) ui.lastPalette = state.settings.palette;
+    if (!NOT_REMEMBERED.includes(state.settings.palette)) ui.lastPalette = state.settings.palette;
     const count = state.leds.x.length;
     $("count").textContent = `${count} LEDs`;
     $("layout-note").textContent = `The LED layout comes from HyperHDR: ${count} LEDs. Change it there, and this preview follows.`;

@@ -24,11 +24,14 @@ import shutil
 import tempfile
 import time
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 from aiohttp import WSMsgType, web
+
+from hyperhdr_sync.engine import WAVE_SAMPLES
 
 LOGGER = logging.getLogger("hyperhdr_bridge.milkdrop")
 
@@ -51,7 +54,8 @@ BLEND_S = 2.7
 FRESH_S = 0.5
 IDLE_STOP_S = 60.0
 RESTART_S = 5.0
-WAVE_SAMPLES = 1024
+# An unanswered request blocks the next one this long, so a slow page is not flooded.
+IN_FLIGHT_S = 0.25
 
 
 def find_chromium(path: str | None = None) -> str | None:
@@ -132,6 +136,7 @@ class _Slot:
         self.beat_due = False
         self.picture: np.ndarray | None = None
         self.picture_at = 0.0
+        self.asked_at = 0.0  # when the request still unanswered was sent; 0 when none is
 
 
 class MilkdropRenderer:
@@ -156,20 +161,15 @@ class MilkdropRenderer:
         self.presets: list[str] = []
         self.ma_prefs = VisualizerPrefs()
 
-    @property
+    @cached_property
     def unavailable_reason(self) -> str | None:
-        """Why MilkDrop cannot run here, or None when it can."""
+        """Why MilkDrop cannot run here, or None when it can (checked once, at first use)."""
         if self._chromium is None:
             return "MilkDrop needs Chromium; install it or give --chromium"
         missing = [name for name in VENDOR_FILES if not (self._vendor / name).is_file()]
         if missing:
             return "MilkDrop needs Butterchurn: run python standalone/fetch_butterchurn.py"
         return None
-
-    @property
-    def running(self) -> bool:
-        """Whether the page is connected and drawing."""
-        return self._ws is not None and not self._ws.closed
 
     def set_preset(self, slot: int, name: str) -> None:
         """
@@ -224,11 +224,15 @@ class MilkdropRenderer:
                 return
             self._task = asyncio.create_task(self._keep_running())
         ws = self._ws
+        state = self._slots[slot]
         if ws is None or ws.closed or not self.presets:
             return
+        if state.asked_at and self._asked_at - state.asked_at < IN_FLIGHT_S:
+            return  # the page is still drawing the last one: skip this frame
         with contextlib.suppress(ConnectionResetError, RuntimeError):
             await self._update_preset(ws, slot)
             await ws.send_bytes(bytes([slot]) + wave[:WAVE_SAMPLES])
+            state.asked_at = self._asked_at
 
     async def close(self) -> None:
         """Stop Chromium and the page's server."""
@@ -372,6 +376,7 @@ class MilkdropRenderer:
         self._ws = ws
         for state in self._slots:
             state.loaded = None
+            state.asked_at = 0.0
         async for message in ws:
             if message.type == WSMsgType.BINARY:
                 self._on_picture(message.data)
@@ -386,9 +391,11 @@ class MilkdropRenderer:
         return ws
 
     def _on_picture(self, data: bytes) -> None:
-        if len(data) != 1 + WIDTH * HEIGHT * 3 or data[0] >= SLOTS:
+        """Take a picture from the page: ``[slot][R G B A per pixel, row by row]``."""
+        if len(data) != 1 + WIDTH * HEIGHT * 4 or data[0] >= SLOTS:
             return
         state = self._slots[data[0]]
-        pixels = np.frombuffer(data, np.uint8, offset=1).reshape(HEIGHT, WIDTH, 3)
-        state.picture = pixels.astype(np.float32) / 255.0
+        pixels = np.frombuffer(data, np.uint8, offset=1).reshape(HEIGHT, WIDTH, 4)
+        state.picture = pixels[..., :3].astype(np.float32) / 255.0
         state.picture_at = time.monotonic()
+        state.asked_at = 0.0

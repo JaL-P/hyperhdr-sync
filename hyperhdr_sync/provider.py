@@ -64,6 +64,11 @@ _SETTINGS_KEYS = (
     CONF_RESPONSE,
     CONF_LATENCY_MS,
 )
+# Choices this plugin does not offer: MilkDrop needs pictures from a headless Chromium,
+# which only the standalone bridge and the add-on run; the user makes their own palette
+# in the web UI.
+_UNOFFERED_EFFECTS = frozenset({Effect.MILKDROP})
+_UNOFFERED_PALETTES = frozenset({Palette.MINE, Palette.MILKDROP})
 # changed_keys arrive namespaced as 'values/<key>'.
 _IMMEDIATE_APPLY_KEYS = {f"values/{key}" for key in _SETTINGS_KEYS}
 
@@ -81,12 +86,10 @@ class HyperHdrProvider(PluginProvider):
                 key=CONF_EFFECT,
                 type=ConfigEntryType.STRING,
                 default_value=DEFAULT_EFFECT.value,
-                # MilkDrop needs pictures from a headless Chromium, which only the
-                # standalone bridge and the add-on run.
                 options=[
                     ConfigValueOption(effect.value)
                     for effect in Effect
-                    if effect != Effect.MILKDROP
+                    if effect not in _UNOFFERED_EFFECTS
                 ],
                 immediate_apply=True,
                 category="settings",
@@ -98,7 +101,7 @@ class HyperHdrProvider(PluginProvider):
                 options=[
                     ConfigValueOption(palette.value)
                     for palette in Palette
-                    if palette not in (Palette.MINE, Palette.MILKDROP)
+                    if palette not in _UNOFFERED_PALETTES
                 ],
                 immediate_apply=True,
                 category="settings",

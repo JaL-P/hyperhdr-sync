@@ -31,7 +31,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import aiohttp
-import numpy as np
 
 # The rendering engine lives in the plugin's folder, next to this folder; the bridge's
 # own modules (web UI, MilkDrop waveform) live in this folder.
@@ -52,6 +51,7 @@ from hyperhdr_sync.engine import (
     EngineSettings,
     Palette,
     Response,
+    bytes_to_wave,
     hex_color,
     parse_hex_color,
 )
@@ -115,7 +115,8 @@ class Bridge:
         # The sound wave from Music Assistant's MilkDrop Visualizer plugin, when set up.
         self.waveform: WaveformFeed | None = None
         # Draws the real MilkDrop presets for the MilkDrop effect and palette, when set up,
-        # and the preset chosen for the LEDs and for the preview (empty: a random one).
+        # and the preset chosen for the LEDs and for the preview (empty: picked as Music
+        # Assistant picks them).
         self.milkdrop: MilkdropRenderer | None = None
         self.milkdrop_preset = ""
         self.preview_milkdrop_preset = ""
@@ -154,14 +155,16 @@ class Bridge:
         :param settings: The new rendering settings.
         :param latency_ms: How far ahead of the music to render.
         :param night_light: Night light brightness, 0..1 (0: off).
-        :param milkdrop_preset: The MilkDrop preset; empty for a random one now and then.
+        :param milkdrop_preset: The MilkDrop preset; empty picks them as Music Assistant does.
         """
         self.engine.update_settings(settings)
         self.latency_us = latency_ms * 1000
         self.night_light = night_light
         self.milkdrop_preset = milkdrop_preset
+        if self.milkdrop is not None:
+            self.milkdrop.set_preset(LIVE, milkdrop_preset)
         if self.preview_settings is not None:
-            self.set_preview(self.preview_settings, self.preview_milkdrop_preset)
+            self.set_preview(self.preview_settings)
         LOGGER.info(
             "Settings applied: %s, %s colours, brightness %d%%, sensitivity %+.0f dB, %s, "
             "%d ms, colour %s, night light %d%%",
@@ -189,6 +192,8 @@ class Bridge:
         """
         if milkdrop_preset is not None:
             self.preview_milkdrop_preset = milkdrop_preset
+            if self.milkdrop is not None:
+                self.milkdrop.set_preset(PREVIEW, milkdrop_preset)
         same_preset = self.preview_milkdrop_preset == self.milkdrop_preset
         if settings == self.engine.settings and (same_preset or not settings.uses_milkdrop):
             self.preview = None
@@ -251,25 +256,19 @@ class Bridge:
         color = payload.color if payload is not None else None
         if color is None:
             return
-        for name in COLOR_FIELDS:
+        # A field the server left undefined keeps its colour, None clears it. on_light is
+        # the colour Music Assistant tints its MilkDrop visualizer with in its dark
+        # full-screen player, for the MilkDrop palette.
+        for name in (*COLOR_FIELDS, "on_light"):
             value = getattr(color, name, None)
-            # a field the server left undefined keeps its colour, None clears it
             if value is None:
                 self._colors[name] = None
             elif isinstance(value, (tuple, list)) and len(value) >= 3:
                 self._colors[name] = (int(value[0]), int(value[1]), int(value[2]))
         colors = [c for name in COLOR_FIELDS if (c := self._colors.get(name)) is not None]
-        self.engine.set_album_colors(colors)
-        if self.preview is not None:
-            self.preview.set_album_colors(colors)
-        # The colour Music Assistant tints its MilkDrop visualizer with in its dark
-        # full-screen player, for the MilkDrop palette.
-        tint = getattr(color, "on_light", None)
-        if tint is None or (isinstance(tint, (tuple, list)) and len(tint) >= 3):
-            rgb = None if tint is None else (int(tint[0]), int(tint[1]), int(tint[2]))
-            self.engine.set_milkdrop_tint(rgb)
-            if self.preview is not None:
-                self.preview.set_milkdrop_tint(rgb)
+        for engine in self._engines():
+            engine.set_album_colors(colors)
+            engine.set_milkdrop_tint(self._colors.get("on_light"))
 
     def stop_stream(self) -> None:
         """Stop rendering; the render loop then blacks the LEDs out."""
@@ -328,7 +327,7 @@ class Bridge:
     def _drain(self, playhead_us: int) -> None:
         """Feed the engine everything that is audible by now."""
         frames = self._frames
-        engines = [self.engine] if self.preview is None else [self.engine, self.preview]
+        engines = self._engines()
         while frames and frames[0].timestamp_us <= playhead_us:
             frame = frames.popleft()
             self._stats["frames"] += 1
@@ -345,33 +344,35 @@ class Bridge:
                 for engine in engines:
                     engine.beat(1.0 if beat.is_downbeat else 0.8)
 
-    def _feed_waveform(self) -> np.ndarray | None:
+    def _engines(self) -> list[Engine]:
+        """Return the live engine and, while settings are previewed, the preview engine."""
+        return [self.engine] if self.preview is None else [self.engine, self.preview]
+
+    def _feed_waveform(self) -> bytes | None:
         """Give the engines the sound wave sounding now, if the MilkDrop plugin sends it."""
         if self.waveform is None:
             return None
-        wave = self.waveform.current(self.latency_us)
-        if wave is not None:
-            self.engine.feed(waveform=wave)
-            if self.preview is not None:
-                self.preview.feed(waveform=wave)
-        return wave
+        data = self.waveform.current(self.latency_us)
+        if data is not None:
+            wave = bytes_to_wave(data)
+            for engine in self._engines():
+                engine.feed(waveform=wave)
+        return data
 
-    async def _feed_milkdrop(self, wave: np.ndarray | None) -> None:
+    async def _feed_milkdrop(self, wave: bytes | None) -> None:
         """Have the MilkDrop presets drawn for the engines that show them."""
         await self.render_milkdrop(self.engine, LIVE, wave)
         if self.preview is not None:
             await self.render_milkdrop(self.preview, PREVIEW, wave)
 
-    async def render_milkdrop(
-        self, engine: Engine, slot: int, wave: np.ndarray | None = None
-    ) -> None:
+    async def render_milkdrop(self, engine: Engine, slot: int, wave: bytes | None = None) -> None:
         """
         Send the next waveform to a MilkDrop slot and give ``engine`` its latest picture.
 
         :param engine: The engine showing that slot.
         :param slot: ``LIVE`` (the LEDs) or ``PREVIEW`` (the web UI).
-        :param wave: The real sound wave (-1..1), if there is one; else one made from the
-            engine's spectrum.
+        :param wave: The real sound wave as the MilkDrop plugin sends it, if there is one;
+            else one made from the engine's spectrum.
         """
         renderer = self.milkdrop
         if renderer is None or not engine.settings.uses_milkdrop:
@@ -381,14 +382,7 @@ class Bridge:
                 LOGGER.warning("%s; showing Liquid instead", reason)
                 self._milkdrop_warned = True
             return
-        data = (
-            engine.synth_waveform()
-            if wave is None
-            else np.rint(np.clip(wave, -1.0, 1.0) * 127.0 + 128.0).astype(np.uint8).tobytes()
-        )
-        preset = self.milkdrop_preset if slot == LIVE else self.preview_milkdrop_preset
-        renderer.set_preset(slot, preset)
-        await renderer.render(slot, data)
+        await renderer.render(slot, engine.synth_waveform() if wave is None else wave)
         picture = renderer.picture(slot)
         if picture is not None:
             engine.feed(picture=picture)
@@ -588,6 +582,8 @@ async def run(args: argparse.Namespace) -> None:
         )
         bridge.milkdrop = MilkdropRenderer(args.chromium)
         bridge.milkdrop_preset = bridge.preview_milkdrop_preset = args.milkdrop_preset
+        for slot in (LIVE, PREVIEW):
+            bridge.milkdrop.set_preset(slot, args.milkdrop_preset)
         # Stop as cleanly on SIGTERM (a service or container stopping) as on Ctrl+C.
         task = asyncio.current_task()
         if task is not None and hasattr(signal, "SIGTERM"):
@@ -620,7 +616,8 @@ async def run(args: argparse.Namespace) -> None:
                     web_url = args.ma_url or web_url_from_sendspin(args.server)
                     bridge.waveform = WaveformFeed()
                     LOGGER.info(
-                        "Liquid will draw the sound wave from Music Assistant at %s", web_url
+                        "MilkDrop and Liquid follow the sound wave from Music Assistant at %s",
+                        web_url,
                     )
                     loops.append(
                         waveform_loop(

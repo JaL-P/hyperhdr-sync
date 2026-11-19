@@ -433,6 +433,19 @@ def test_own_palette_blends_or_shows_blocks() -> None:
     assert palette_swatch(Palette.MINE) == palette_swatch(Palette.RAINBOW), "no colours: rainbow"
 
 
+# Luminosity weights of the CSS colour blend, which the MilkDrop tint uses.
+LUMINOSITY = np.array([0.3, 0.59, 0.11])
+
+
+def _show(engine: Engine, picture: np.ndarray, frames: int) -> np.ndarray:
+    """Play loud music with a MilkDrop picture for some frames; return the last frame."""
+    frame = np.zeros((1, 3), np.uint8)
+    for _ in range(frames):
+        engine.feed(loudness=LOUD, spectrum=[LOUD] * SPECTRUM_BINS, picture=picture)
+        frame = np.frombuffer(engine.render(DT), np.uint8).reshape(-1, 3)
+    return frame
+
+
 def _picture(left: tuple[int, int, int], right: tuple[int, int, int]) -> np.ndarray:
     """Return a 96x54 picture: one colour on the left half, another on the right."""
     picture = np.zeros((54, 96, 3), np.float32)
@@ -445,10 +458,7 @@ def test_milkdrop_shows_the_picture_at_the_edges() -> None:
     """The LEDs take the colours at their edge of the picture, as a screen grabber would."""
     engine = Engine(_tv_layout(), EngineSettings(effect=Effect.MILKDROP, palette=Palette.MILKDROP))
     picture = _picture((255, 0, 0), (0, 0, 255))
-    frame = np.zeros((1, 3), int)
-    for _ in range(30):
-        engine.feed(loudness=LOUD, spectrum=[LOUD] * SPECTRUM_BINS, picture=picture)
-        frame = np.frombuffer(engine.render(DT), np.uint8).reshape(-1, 3).astype(int)
+    frame = _show(engine, picture, 30).astype(int)
     left, right = frame[:14], frame[-14:]
     assert (left[:, 0] > 200).all()
     assert (left[:, 2] < 30).all()
@@ -462,14 +472,10 @@ def test_milkdrop_tint_keeps_the_brightness() -> None:
     frames = {}
     for palette in (Palette.MILKDROP, Palette.OCEAN):
         engine = Engine(_tv_layout(), EngineSettings(effect=Effect.MILKDROP, palette=palette))
-        frame = np.zeros((1, 3))
-        for _ in range(30):
-            engine.feed(loudness=LOUD, spectrum=[LOUD] * SPECTRUM_BINS, picture=picture)
-            frame = np.frombuffer(engine.render(DT), np.uint8).reshape(-1, 3) / 255.0
+        frame = _show(engine, picture, 30) / 255.0
         frames[palette] = frame
-    weights = np.array([0.3, 0.59, 0.11])
     own, tinted = frames[Palette.MILKDROP], frames[Palette.OCEAN]
-    assert np.allclose(own @ weights, tinted @ weights, atol=0.03), "same luminosity"
+    assert np.allclose(own @ LUMINOSITY, tinted @ LUMINOSITY, atol=0.03), "same luminosity"
     assert not np.allclose(own, tinted, atol=0.1), "different colours"
     assert (tinted[:14, 0] < tinted[:14, 2]).all(), "ocean blues instead of red"
 
@@ -479,19 +485,16 @@ def test_milkdrop_falls_back_to_liquid_without_a_picture() -> None:
     engine = Engine(_tv_layout(), EngineSettings(effect=Effect.MILKDROP))
     frame = _settle(engine, [LOUD] * SPECTRUM_BINS, frames=60)
     assert frame.max() > 50
-    assert engine.uses_milkdrop
+    assert engine.settings.uses_milkdrop
     assert not engine.has_fresh_picture()
 
 
 def test_milkdrop_palette_follows_the_picture() -> None:
     """With another effect, the MilkDrop palette takes the colours round the picture's edges."""
     engine = Engine(_tv_layout(), EngineSettings(effect=Effect.LUMINA, palette=Palette.MILKDROP))
-    assert engine.uses_milkdrop
+    assert engine.settings.uses_milkdrop
     picture = _picture((0, 255, 0), (0, 255, 0))
-    frame = np.zeros((1, 3), int)
-    for _ in range(120):
-        engine.feed(loudness=LOUD, spectrum=[LOUD] * SPECTRUM_BINS, picture=picture)
-        frame = np.frombuffer(engine.render(DT), np.uint8).reshape(-1, 3).astype(int)
+    frame = _show(engine, picture, 120).astype(int)
     assert frame.max() > 50
     assert (frame[:, 1] >= frame[:, 0]).all()
     assert (frame[:, 1] >= frame[:, 2]).all()
@@ -518,13 +521,9 @@ def test_milkdrop_palette_tints_like_music_assistant() -> None:
         )
         engine.set_milkdrop_tint(tint)
         assert engine.milkdrop_tint == tint
-        frame = np.zeros((1, 3))
-        for _ in range(30):
-            engine.feed(loudness=LOUD, spectrum=[LOUD] * SPECTRUM_BINS, picture=picture)
-            frame = np.frombuffer(engine.render(DT), np.uint8).reshape(-1, 3) / 255.0
+        frame = _show(engine, picture, 30) / 255.0
         frames.append(frame)
     own, tinted = frames
-    weights = np.array([0.3, 0.59, 0.11])
-    assert np.allclose(own @ weights, tinted @ weights, atol=0.03), "same brightness"
+    assert np.allclose(own @ LUMINOSITY, tinted @ LUMINOSITY, atol=0.03), "same brightness"
     assert (own[:14, 0] > own[:14, 1]).all(), "untinted: the preset's own red"
     assert (tinted[:14, 1] > tinted[:14, 0]).all(), "tinted: green from the cover"

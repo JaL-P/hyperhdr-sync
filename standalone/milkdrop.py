@@ -27,13 +27,13 @@ from collections.abc import Callable
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import aiohttp
-import numpy as np
 from milkdrop_render import VisualizerPrefs
+
+from hyperhdr_sync.engine import WAVE_SAMPLES
 
 LOGGER = logging.getLogger("hyperhdr_bridge.milkdrop")
 
 WAVE_TAG = 22
-WAVE_SAMPLES = 1024
 _HEADER = struct.Struct(">Bq")
 # Music Assistant's web server, when only the Sendspin address is known.
 DEFAULT_WEB_PORT = 8095
@@ -89,7 +89,6 @@ class WaveformFeed:
         self._frames: deque[tuple[int, bytes]] = deque()
         self._syncs: deque[tuple[int, float]] = deque(maxlen=SYNC_SAMPLES)
         self.offset_us: float | None = None
-        self.connected = False
 
     def add_frame(self, data: bytes) -> None:
         """
@@ -131,12 +130,12 @@ class WaveformFeed:
         self._syncs.clear()
         self.offset_us = None
 
-    def current(self, ahead_us: int = 0) -> np.ndarray | None:
+    def current(self, ahead_us: int = 0) -> bytes | None:
         """
-        Return the waveform sounding ``ahead_us`` from now, as 1024 floats in -1..1.
+        Return the waveform sounding ``ahead_us`` from now, as it came (see ``bytes_to_wave``).
 
         :param ahead_us: How far ahead of the music the lights are rendered.
-        :return: The waveform, or None when there is none for this moment.
+        :return: 1024 unsigned bytes (128 being zero), or None when there is none for now.
         """
         if self.offset_us is None:
             return None
@@ -148,7 +147,7 @@ class WaveformFeed:
             due_at, due = frames.popleft()
         if due is None or playhead - due_at > STALE_US:
             return None
-        return (np.frombuffer(due, np.uint8).astype(np.float32) - 128.0) / 127.0
+        return due
 
 
 async def preferences_loop(
@@ -219,7 +218,6 @@ async def waveform_loop(
                 "MilkDrop waveform not reachable at %s (%s)", url, err or type(err).__name__
             )
         finally:
-            feed.connected = False
             feed.reset()
         await asyncio.sleep(delay)
 
@@ -267,7 +265,6 @@ def _on_text(feed: WaveformFeed, data: object) -> bool:
     kind = data.get("type")
     if kind == "auth_ok":
         LOGGER.info("Receiving the MilkDrop waveform from Music Assistant")
-        feed.connected = True
         return True
     if kind == "server/time":
         payload = data["payload"]
