@@ -54,6 +54,10 @@ BLEND_S = 2.7
 FRESH_S = 0.5
 IDLE_STOP_S = 60.0
 RESTART_S = 5.0
+# While pictures are asked for, a page silent this long (gone, or broken by a script error)
+# gets Chromium restarted; a request this recent counts as being asked.
+PAGE_TIMEOUT_S = 15.0
+ASKING_S = 2.0
 # An unanswered request blocks the next one this long, so a slow page is not flooded.
 IN_FLIGHT_S = 0.25
 
@@ -160,6 +164,8 @@ class MilkdropRenderer:
         self._rng = random.Random()  # noqa: S311 - picks presets, nothing secret
         self.presets: list[str] = []
         self.ma_prefs = VisualizerPrefs()
+        self._page_seen_at = 0.0
+        self._unknown_warned: set[str] = set()
 
     @cached_property
     def unavailable_reason(self) -> str | None:
@@ -245,7 +251,12 @@ class MilkdropRenderer:
     # -------------------------------------------------------------- internals
 
     async def _update_preset(self, ws: web.WebSocketResponse, slot: int) -> None:
-        """Load the preset a slot should show now, picked the way Music Assistant picks it."""
+        """
+        Load the preset a slot should show now, picked the way Music Assistant picks it.
+
+        :param ws: The page's connection.
+        :param slot: ``LIVE`` or ``PREVIEW``.
+        """
         state = self._slots[slot]
         now = time.monotonic()
         prefs = self.ma_prefs
@@ -277,9 +288,23 @@ class MilkdropRenderer:
     def _choose(
         self, wanted: str, prefs: VisualizerPrefs, current: str | None, *, forced: bool
     ) -> str | None:
-        """Pick a preset: the one asked for, else as Music Assistant's settings say."""
+        """
+        Pick a preset: the one asked for, else as Music Assistant's settings say.
+
+        :param wanted: The preset chosen for this slot; empty follows Music Assistant.
+        :param prefs: Music Assistant's visualizer settings.
+        :param current: The preset shown now, avoided by a random pick.
+        :param forced: A beat switch: skip Music Assistant's fixed preset, as it does.
+        :return: The preset, or None when there are none.
+        """
         if wanted in self.presets:
             return wanted
+        if wanted and wanted not in self._unknown_warned:
+            self._unknown_warned.add(wanted)
+            LOGGER.warning(
+                "MilkDrop preset %r is not one of Music Assistant's; following Music Assistant",
+                wanted,
+            )
         if not forced and prefs.mode == "fixed" and prefs.preset in self.presets:
             return prefs.preset
         pool = self.presets
@@ -315,31 +340,54 @@ class MilkdropRenderer:
                 state.picture = None
 
     async def _run_chromium(self, url: str) -> None:
-        """Run Chromium on the page until it exits, or until MilkDrop is no longer used."""
+        """
+        Run Chromium on the page until it exits, its page goes silent, or nothing uses it.
+
+        :param url: The page's address.
+        """
         assert self._chromium is not None
-        with tempfile.TemporaryDirectory(prefix="hyperhdr-milkdrop-") as profile:
-            try:
-                process = await self._start_chromium(url, profile)
-            except OSError:
-                LOGGER.exception("Cannot start Chromium for MilkDrop")
-                return
-            LOGGER.info("Started Chromium for the MilkDrop presets")
-            try:
-                while process.returncode is None:
-                    if time.monotonic() - self._asked_at >= IDLE_STOP_S:
-                        break
-                    with contextlib.suppress(TimeoutError):
-                        await asyncio.wait_for(process.wait(), 1.0)
-                if process.returncode is not None:
-                    LOGGER.warning("Chromium exited (%s), restarting it", process.returncode)
-            finally:
-                if process.returncode is None:
-                    process.terminate()
-                    try:
-                        await asyncio.wait_for(process.wait(), 5.0)
-                    except TimeoutError:
-                        process.kill()
-                        await process.wait()
+        # A Chromium profile holds many files: make and remove it off the event loop.
+        profile = await asyncio.to_thread(tempfile.mkdtemp, prefix="hyperhdr-milkdrop-")
+        try:
+            await self._run_chromium_in(url, profile)
+        finally:
+            await asyncio.to_thread(shutil.rmtree, profile, ignore_errors=True)
+
+    async def _run_chromium_in(self, url: str, profile: str) -> None:
+        """
+        Start Chromium with ``profile`` and watch it until it should stop.
+
+        :param url: The page's address.
+        :param profile: A fresh folder for Chromium's profile.
+        """
+        try:
+            process = await self._start_chromium(url, profile)
+        except OSError:
+            LOGGER.exception("Cannot start Chromium for MilkDrop")
+            return
+        LOGGER.info("Started Chromium for the MilkDrop presets")
+        started = time.monotonic()
+        try:
+            while process.returncode is None:
+                now = time.monotonic()
+                if now - self._asked_at >= IDLE_STOP_S:
+                    break
+                silent = now - max(started, self._page_seen_at)
+                if now - self._asked_at < ASKING_S and silent > PAGE_TIMEOUT_S:
+                    LOGGER.warning("The MilkDrop page stopped answering, restarting Chromium")
+                    break
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(process.wait(), 1.0)
+            if process.returncode is not None:
+                LOGGER.warning("Chromium exited (%s), restarting it", process.returncode)
+        finally:
+            if process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), 5.0)
+                except TimeoutError:
+                    process.kill()
+                    await process.wait()
 
     async def _start_chromium(self, url: str, profile: str) -> asyncio.subprocess.Process:
         """Start Chromium on the page, headless, with a throwaway profile."""
@@ -385,6 +433,7 @@ class MilkdropRenderer:
                     data = json.loads(message.data)
                     if isinstance(data, dict) and data.get("type") == "hello":
                         self.presets = sorted(str(name) for name in data.get("presets", []))
+                        self._page_seen_at = time.monotonic()
                         LOGGER.info("MilkDrop ready with %d presets", len(self.presets))
         if self._ws is ws:
             self._ws = None
@@ -397,5 +446,5 @@ class MilkdropRenderer:
         state = self._slots[data[0]]
         pixels = np.frombuffer(data, np.uint8, offset=1).reshape(HEIGHT, WIDTH, 4)
         state.picture = pixels[..., :3].astype(np.float32) / 255.0
-        state.picture_at = time.monotonic()
+        state.picture_at = self._page_seen_at = time.monotonic()
         state.asked_at = 0.0

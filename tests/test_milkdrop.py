@@ -61,8 +61,10 @@ def test_feed_hands_out_the_frame_sounding_now() -> None:
     assert float(wave.max()) <= 1.0
     assert float(wave.min()) >= -1.0
     assert wave[1] > 0.5, "the frame due now, not the one after it"
-    assert feed.current(ahead_us=500_000) is not None, "rendering ahead picks the next frame"
-    assert feed.current() is None, "nothing new is due"
+    assert feed.current() == data, "between two frames the last one keeps sounding"
+    later = feed.current(ahead_us=500_000)
+    assert later is not None
+    assert later != data, "rendering ahead picks the next frame"
 
 
 def test_feed_skips_stale_frames_and_restarts_after_a_jump() -> None:

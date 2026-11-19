@@ -728,9 +728,11 @@
     const follows = p.milkdrop_preset ? ""
       : md.from_music_assistant ? ` Music Assistant: ${md.follows}.`
       : ` Music Assistant's default: ${md.follows}. Add a Music Assistant token to follow your own settings and favourites.`;
+    const unknown = p.milkdrop_preset && names.length && !names.includes(p.milkdrop_preset)
+      ? ` "${p.milkdrop_preset}" is not one of Music Assistant's presets, so it follows Music Assistant.` : "";
     $("milkdrop-now").textContent = md.unavailable ? `${md.unavailable}. Liquid stands in.`
       : !names.length ? "Starting the MilkDrop renderer…"
-      : (md.showing ? `Showing: ${md.showing}.` : "") + follows;
+      : (md.showing ? `Showing: ${md.showing}.` : "") + (unknown || follows);
   }
 
   function colourDots(container, idPrefix) {

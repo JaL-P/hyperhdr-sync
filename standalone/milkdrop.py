@@ -87,6 +87,7 @@ class WaveformFeed:
     def __init__(self) -> None:
         """Initialize an empty feed."""
         self._frames: deque[tuple[int, bytes]] = deque()
+        self._last: tuple[int, bytes] | None = None
         self._syncs: deque[tuple[int, float]] = deque(maxlen=SYNC_SAMPLES)
         self.offset_us: float | None = None
 
@@ -123,16 +124,21 @@ class WaveformFeed:
     def clear(self) -> None:
         """Drop the queued frames (the audio stopped or jumped)."""
         self._frames.clear()
+        self._last = None
 
     def reset(self) -> None:
         """Forget frames and the clock: a new connection starts from scratch."""
         self._frames.clear()
+        self._last = None
         self._syncs.clear()
         self.offset_us = None
 
     def current(self, ahead_us: int = 0) -> bytes | None:
         """
         Return the waveform sounding ``ahead_us`` from now, as it came (see ``bytes_to_wave``).
+
+        Frames arrive about 43 times a second and the lights render faster, so between two
+        frames the last one keeps sounding until it is stale.
 
         :param ahead_us: How far ahead of the music the lights are rendered.
         :return: 1024 unsigned bytes (128 being zero), or None when there is none for now.
@@ -141,13 +147,11 @@ class WaveformFeed:
             return None
         playhead = _now_us() + self.offset_us + ahead_us
         frames = self._frames
-        due: bytes | None = None
-        due_at = 0
         while frames and frames[0][0] <= playhead:
-            due_at, due = frames.popleft()
-        if due is None or playhead - due_at > STALE_US:
+            self._last = frames.popleft()
+        if self._last is None or playhead - self._last[0] > STALE_US:
             return None
-        return due
+        return self._last[1]
 
 
 async def preferences_loop(
@@ -223,7 +227,14 @@ async def waveform_loop(
 
 
 async def _serve(feed: WaveformFeed, ws: aiohttp.ClientWebSocketResponse, token: str) -> float:
-    """Sign in, keep the clock in sync and take frames; return how long to wait to reconnect."""
+    """
+    Sign in, keep the clock in sync and take frames until the connection ends.
+
+    :param feed: Where frames and clock samples go.
+    :param ws: The open connection to the plugin.
+    :param token: A Music Assistant long-lived access token.
+    :return: How long to wait before connecting again.
+    """
     await ws.send_str(json.dumps({"type": "auth", "token": token}))
     sync_task: asyncio.Task[None] | None = None
     try:
@@ -281,7 +292,11 @@ def _on_text(feed: WaveformFeed, data: object) -> bool:
 
 
 async def _sync_clock(ws: aiohttp.ClientWebSocketResponse) -> None:
-    """Ask the server for its time: quickly at first, then every few seconds."""
+    """
+    Ask the server for its time: quickly at first, then every few seconds.
+
+    :param ws: The signed-in connection to the plugin.
+    """
     sent = 0
     while not ws.closed:
         await ws.send_str(

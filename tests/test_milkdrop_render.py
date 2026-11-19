@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -375,3 +376,56 @@ def test_bridge_passes_music_assistants_tint_beats_and_starts() -> None:
         cast("Any", SimpleNamespace(color=SimpleNamespace(**{**vars(palette), "on_light": None})))
     )
     assert bridge.engine.milkdrop_tint is None
+
+
+class _FakeChromium:
+    """A Chromium process that runs until terminated."""
+
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+        self._ended = asyncio.Event()
+
+    async def wait(self) -> int:
+        await self._ended.wait()
+        assert self.returncode is not None
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.returncode = -15
+        self._ended.set()
+
+    def kill(self) -> None:
+        self.terminate()
+
+
+async def test_silent_page_gets_chromium_restarted(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """While pictures are wanted, a Chromium whose page never answers is stopped for a restart."""
+    renderer = MilkdropRenderer(chromium=sys.executable)
+    process = _FakeChromium()
+
+    async def start(url: str, profile: str) -> _FakeChromium:
+        del url
+        assert Path(profile).is_dir()
+        return process
+
+    monkeypatch.setattr(renderer, "_start_chromium", start)
+    monkeypatch.setattr(milkdrop_render, "PAGE_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(milkdrop_render, "ASKING_S", 10.0)
+    renderer._asked_at = time.monotonic()  # noqa: SLF001
+    async with asyncio.timeout(10):
+        await renderer._run_chromium("http://127.0.0.1:1/page")  # noqa: SLF001
+    assert process.returncode == -15, "terminated, so the caller starts a fresh one"
+    assert "stopped answering" in caplog.text
+
+
+def test_unknown_preset_is_reported_once(caplog: pytest.LogCaptureFixture) -> None:
+    """A chosen preset that is not in the packs is said once; Music Assistant's choice shows."""
+    renderer = MilkdropRenderer(chromium=sys.executable)
+    renderer.presets = ["alpha", "beta"]
+    prefs = VisualizerPrefs(mode="fixed", preset="beta")
+    for _ in range(3):
+        choice = renderer._choose("gone", prefs, None, forced=False)  # noqa: SLF001
+        assert choice == "beta"
+    assert caplog.text.count("'gone' is not one of Music Assistant's") == 1
