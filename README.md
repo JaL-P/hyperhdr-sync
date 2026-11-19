@@ -157,6 +157,14 @@ HyperHDR client and run anywhere.
 | `standalone/hyperhdr_bridge.py` | The standalone bridge |
 | `hyperhdr_sync_addon/`, `repository.yaml` | The Home Assistant add-on, which runs the standalone bridge |
 
+## Support
+
+Have some spare cash and want to support me? Then buy me a coffee.
+
+[![Support JaLP on Ko-fi](https://storage.ko-fi.com/cdn/generated/zfskfgqnf/rest-8069498602ed186c3d10b21015c27d14-uaqhyms7.jpg)](https://ko-fi.com/jalp_)
+
+[ko-fi.com/jalp_](https://ko-fi.com/jalp_)
+
 ## Licence
 
 Apache-2.0, like Music Assistant.
